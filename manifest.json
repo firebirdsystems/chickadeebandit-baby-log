@@ -1,0 +1,42 @@
+{
+  "id": "baby-log",
+  "name": "Baby Log",
+  "version": "1.0.0",
+  "description": "Track feeds, diapers, naps, and pumping for your baby — quick one-tap logging, a running sleep timer, and a daily summary every caregiver can see.",
+  "entrypoint": "index.html",
+  "runtime": "static",
+  "category": "family",
+  "tags": ["baby", "newborn", "feeding", "sleep", "diapers", "parenting"],
+  "icon": "🍼",
+  "data_access": {
+    "reads": ["family.members"],
+    "writes": []
+  },
+  "permissions": {
+    "default_audience": "everyone",
+    "requires_approval": false
+  },
+  "storage": "db",
+  "db_plaintext_columns": ["entry_type", "birth_date"],
+  "row_policies": {
+    "babies": {
+      "kind": "adult_writable"
+    },
+    "entries": {
+      "kind": "adult_writable",
+      "retain_days": {
+        "default": 730,
+        "timestamp_column": "started_at"
+      }
+    }
+  },
+  "nav": { "label": "Baby Log" },
+  "resource_limits": {
+    "max_db_bytes": 52428800
+  },
+  "ai_access": {
+    "allowed": true,
+    "mode": "read",
+    "db_exports": ["recent_entries", "babies"]
+  }
+}

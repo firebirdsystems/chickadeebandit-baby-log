@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Baby Log</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: var(--hub-bg, #f9fafb);
+      --surface: var(--hub-surface, #ffffff);
+      --border: var(--hub-border, #e5e7eb);
+      --border-mid: var(--hub-border, #d1d5db);
+      --text: var(--hub-text, #111827);
+      --muted: var(--hub-text-muted, #6b7280);
+      --accent: var(--hub-primary, #111827);
+      --accent-hover: var(--hub-primary-hover, #374151);
+      --accent-fg: var(--hub-primary-fg, #ffffff);
+      --radius: var(--hub-radius, 10px);
+      --green: #047857; --green-soft: #d1fae5;
+      --amber: #b45309; --amber-soft: #fef3c7;
+      --red: #b91c1c; --red-soft: #fee2e2;
+      --blue: #1d4ed8; --blue-soft: #dbeafe;
+      --shadow: 0 1px 3px rgba(15, 23, 42, .07);
+    }
+    body {
+      min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: var(--hub-font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+      font-size: var(--hub-font-size, 15px); line-height: 1.5;
+    }
+    .app { max-width: 720px; margin: 0 auto; padding: 16px; }
+    .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    h1 { font-size: 1.35rem; line-height: 1.2; }
+    h2 { font-size: .95rem; margin-bottom: 10px; }
+    .muted { color: var(--muted); }
+    .tiny { font-size: .78rem; }
+    .stack { display: grid; gap: 8px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      border: 1px solid transparent; border-radius: 8px; padding: 8px 12px;
+      font: inherit; font-size: .86rem; font-weight: 700; cursor: pointer;
+      min-height: 38px; background: var(--accent); color: var(--accent-fg);
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled { opacity: .48; cursor: default; }
+    .btn-ghost { background: transparent; color: var(--text); border-color: var(--border-mid); }
+    .btn-ghost:hover { background: rgba(127,127,127,.08); }
+    .btn-danger { background: var(--red-soft); color: var(--red); }
+    .btn-sm { min-height: 31px; padding: 5px 10px; font-size: .78rem; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .tab {
+      border: 1px solid var(--border-mid); background: var(--surface); color: var(--text);
+      border-radius: 999px; padding: 5px 13px; font: inherit; font-size: .84rem; font-weight: 700; cursor: pointer;
+    }
+    .tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+    .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+    .quick button {
+      display: grid; gap: 2px; justify-items: center; padding: 10px 4px;
+      background: var(--surface); border: 1px solid var(--border-mid); border-radius: var(--radius);
+      font: inherit; font-size: .78rem; font-weight: 700; cursor: pointer; color: var(--text);
+    }
+    .quick button:hover { border-color: var(--accent); }
+    .quick .q-icon { font-size: 1.3rem; }
+    .quick button.sleeping { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat { display: grid; gap: 1px; padding: 9px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    .stat .v { font-size: 1.05rem; font-weight: 800; }
+    .stat .k { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 800; }
+    .day-head { margin: 16px 2px 6px; font-size: .8rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .entry {
+      display: flex; align-items: center; gap: 11px; padding: 9px 12px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    }
+    .entry-icon { font-size: 1.15rem; width: 30px; text-align: center; flex-shrink: 0; }
+    .entry-body { flex: 1; min-width: 0; }
+    .entry-title { font-weight: 700; font-size: .9rem; }
+    .entry-meta { color: var(--muted); font-size: .78rem; }
+    .entry-side { flex-shrink: 0; text-align: right; display: grid; gap: 2px; justify-items: end; }
+    .edit-link { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: .76rem; font-weight: 700; padding: 2px 4px; }
+    .edit-link:hover { color: var(--text); text-decoration: underline; }
+    .empty { color: var(--muted); text-align: center; padding: 34px 16px; }
+    .error { background: var(--red-soft); color: var(--red); padding: 9px 12px; border-radius: 8px; margin-bottom: 10px; font-size: .86rem; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.42); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .modal { background: var(--surface); border-radius: 14px; padding: 22px; width: 100%; max-width: 440px; box-shadow: 0 20px 60px rgba(0,0,0,.25); max-height: 92vh; overflow-y: auto; }
+    .modal h2 { font-size: 1.05rem; margin-bottom: 16px; }
+    .form { display: grid; gap: 12px; }
+    .field { display: grid; gap: 5px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    label { font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
+    input, select, textarea {
+      width: 100%; border: 1.5px solid var(--border-mid); border-radius: 8px;
+      padding: 9px 11px; font: inherit; background: var(--surface); color: var(--text);
+    }
+    textarea { min-height: 56px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    .modal-actions { display: flex; gap: 8px; margin-top: 6px; justify-content: flex-end; }
+    .modal-left { margin-right: auto; }
+    @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } .quick { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+  <base href="/run/baby-log/">
+</head>
+<body>
+<div class="app">
+  <div id="root" class="empty">Loading…</div>
+</div>
+
+<script type="module">
+import { esc, isAdult, hubConfirm } from "/hub-sdk.js";
+import {
+  ENTRY_TYPES, typeMeta, fmtDuration, timeAgo, dayKey, groupByDay,
+  summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel,
+} from "./logic.js";
+
+const CONTEXT = window.__CONTEXT_URL ?? "";
+const DB = window.__DB_URL ?? "";
+const HUB_MEMBER = window.__CURRENT_MEMBER ?? null;
+
+let members = [];
+let memberMap = new Map();
+let me = null;
+let babies = [];
+let entries = [];
+let currentBabyId = null;
+let error = "";
+let modalEl = null;
+let tickTimer = null;
+
+function nowIso() { return new Date().toISOString(); }
+function canManage() { return !!me && isAdult(me); }
+function memberName(id) { return memberMap.get(id)?.name ?? "Someone"; }
+
+/* ── DB helper ─────────────────────────────────────────────────────────────── */
+async function db(sql, params = []) {
+  if (!DB) return { rows: [] };
+  const res = await fetch(DB, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql, params }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error);
+  return json;
+}
+
+/* ── Loading ───────────────────────────────────────────────────────────────── */
+async function loadMembers() {
+  if (!CONTEXT) {
+    members = [
+      { id: "demo-1", name: "Alex", role: "adult" },
+      { id: "demo-2", name: "Jordan", role: "adult" },
+    ];
+  } else {
+    try {
+      const res = await fetch(`${CONTEXT}?keys=family.members`);
+      members = ((await res.json())["family.members"]) ?? [];
+    } catch { members = []; }
+  }
+  memberMap = new Map(members.map((m) => [m.id, m]));
+  me = HUB_MEMBER ?? members[0] ?? { id: "guest", name: "Guest", role: "adult" };
+}
+
+async function loadBabies() {
+  if (!DB) {
+    babies = [{ id: "demo-baby", name: "Willow", birth_date: "2026-04-20", emoji: "👶", archived: 0, created_by: "demo-1", created_at: nowIso() }];
+    return;
+  }
+  const res = await db("SELECT id, name, birth_date, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at");
+  babies = res.rows ?? [];
+}
+
+async function loadEntries() {
+  if (!DB) {
+    const now = Date.now();
+    entries = [
+      { id: "e1", baby_id: "demo-baby", entry_type: "feed", started_at: new Date(now - 90 * 60000).toISOString(), ended_at: null, amount_ml: 120, feed_kind: "bottle", diaper_kind: "", note: "", created_by: "demo-1", created_at: nowIso() },
+      { id: "e2", baby_id: "demo-baby", entry_type: "diaper", started_at: new Date(now - 3 * 3600000).toISOString(), ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "wet", note: "", created_by: "demo-2", created_at: nowIso() },
+      { id: "e3", baby_id: "demo-baby", entry_type: "sleep", started_at: new Date(now - 5 * 3600000).toISOString(), ended_at: new Date(now - 3.5 * 3600000).toISOString(), amount_ml: null, feed_kind: "", diaper_kind: "", note: "", created_by: "demo-1", created_at: nowIso() },
+    ];
+    return;
+  }
+  // Bounded: the timeline shows the recent log; retain_days prunes the rest.
+  const res = await db(
+    "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400",
+  );
+  entries = res.rows ?? [];
+}
+
+async function refresh() {
+  error = "";
+  try {
+    await Promise.all([loadMembers(), loadBabies(), loadEntries()]);
+    if (!currentBabyId || !babies.some((b) => b.id === currentBabyId)) currentBabyId = babies[0]?.id ?? null;
+    render();
+  } catch (e) { error = e.message; render(); }
+}
+
+function showError(msg) { error = msg; render(); }
+
+/* ── Mutations ─────────────────────────────────────────────────────────────── */
+async function addBaby(fields) {
+  const row = { id: crypto.randomUUID(), name: fields.name, birth_date: fields.birth_date, emoji: "👶", archived: 0, created_by: me.id, created_at: nowIso() };
+  babies = [...babies, row];
+  currentBabyId = row.id;
+  closeModal();
+  render();
+  try {
+    await db("INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES (?,?,?,?,0,?,?)",
+      [row.id, row.name, row.birth_date, row.emoji, row.created_by, row.created_at]);
+  } catch (e) {
+    babies = babies.filter((b) => b.id !== row.id);
+    currentBabyId = babies[0]?.id ?? null;
+    showError(e.message);
+  }
+}
+
+async function archiveBaby(id) {
+  const ok = await hubConfirm({ message: "Archive this child?", description: "The log stays in the database but the child is hidden from the app.", confirmLabel: "Archive", destructive: true });
+  if (!ok) return;
+  const prev = babies;
+  babies = babies.filter((b) => b.id !== id);
+  if (currentBabyId === id) currentBabyId = babies[0]?.id ?? null;
+  closeModal();
+  render();
+  try {
+    await db("UPDATE app_baby_log__babies SET archived = 1 WHERE id = ?", [id]);
+  } catch (e) { babies = prev; showError(e.message); }
+}
+
+async function saveEntry(fields, existingId) {
+  const now = nowIso();
+  if (existingId) {
+    const idx = entries.findIndex((e) => e.id === existingId);
+    const prev = idx !== -1 ? entries[idx] : null;
+    if (idx !== -1) entries[idx] = { ...entries[idx], ...fields };
+    closeModal();
+    render();
+    try {
+      await db(
+        "UPDATE app_baby_log__entries SET entry_type=?, started_at=?, ended_at=?, amount_ml=?, feed_kind=?, diaper_kind=?, note=? WHERE id=?",
+        [fields.entry_type, fields.started_at, fields.ended_at, fields.amount_ml, fields.feed_kind, fields.diaper_kind, fields.note, existingId],
+      );
+    } catch (e) {
+      if (idx !== -1 && prev) entries[idx] = prev;
+      showError(e.message);
+    }
+  } else {
+    const row = { id: crypto.randomUUID(), baby_id: currentBabyId, ...fields, created_by: me.id, created_at: now };
+    entries = [row, ...entries];
+    closeModal();
+    render();
+    try {
+      await db(
+        "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        [row.id, row.baby_id, row.entry_type, row.started_at, row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_at],
+      );
+    } catch (e) {
+      entries = entries.filter((x) => x.id !== row.id);
+      showError(e.message);
+    }
+  }
+}
+
+async function deleteEntry(id) {
+  const ok = await hubConfirm({ message: "Delete this entry?", confirmLabel: "Delete", destructive: true });
+  if (!ok) return;
+  const prev = entries;
+  entries = entries.filter((e) => e.id !== id);
+  closeModal();
+  render();
+  try { await db("DELETE FROM app_baby_log__entries WHERE id = ?", [id]); }
+  catch (e) { entries = prev; showError(e.message); }
+}
+
+/** Toggle the sleep timer: start a running entry, or stamp ended_at on it. */
+async function toggleSleep() {
+  const running = runningSleep(entries, currentBabyId);
+  if (running) {
+    const endedAt = nowIso();
+    const idx = entries.findIndex((e) => e.id === running.id);
+    const prev = entries[idx];
+    entries[idx] = { ...running, ended_at: endedAt };
+    render();
+    try { await db("UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ?", [endedAt, running.id]); }
+    catch (e) { entries[idx] = prev; showError(e.message); }
+  } else {
+    await saveEntry({ entry_type: "sleep", started_at: nowIso(), ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "", note: "" }, null);
+  }
+}
+
+/* ── Rendering ─────────────────────────────────────────────────────────────── */
+function dayLabel(key) {
+  const today = dayKey(nowIso());
+  const yesterday = dayKey(new Date(Date.now() - 86400000).toISOString());
+  if (key === today) return "Today";
+  if (key === yesterday) return "Yesterday";
+  const d = new Date(`${key}T12:00:00`);
+  return new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(d);
+}
+
+function renderEntry(e) {
+  const meta = typeMeta(e.entry_type);
+  const t = new Date(e.started_at);
+  const time = Number.isNaN(t.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(t);
+  const detail = entryDetail(e);
+  return `
+    <div class="entry">
+      <div class="entry-icon" aria-hidden="true">${meta.icon}</div>
+      <div class="entry-body">
+        <div class="entry-title">${esc(meta.label)}${detail ? ` <span class="muted">· ${esc(detail)}</span>` : ""}</div>
+        ${e.note ? `<div class="entry-meta">${esc(e.note)}</div>` : ""}
+        <div class="entry-meta">${esc(time)} · ${esc(memberName(e.created_by))}</div>
+      </div>
+      <div class="entry-side">
+        ${canManage() ? `<button class="edit-link" data-edit="${esc(e.id)}">Edit</button>` : ""}
+      </div>
+    </div>`;
+}
+
+function render() {
+  const root = document.getElementById("root");
+  root.className = "app-root";
+
+  if (!babies.length) {
+    root.innerHTML = `
+      <div class="topbar"><h1>Baby Log</h1></div>
+      ${error ? `<div class="error">${esc(error)}</div>` : ""}
+      <div class="card empty">
+        No children yet.${canManage() ? "" : " Ask a parent to add one."}
+        ${canManage() ? `<div style="margin-top:12px"><button class="btn" data-add-baby>+ Add your baby</button></div>` : ""}
+      </div>`;
+    return;
+  }
+
+  const baby = babies.find((b) => b.id === currentBabyId) ?? babies[0];
+  const babyEntries = entries.filter((e) => e.baby_id === baby.id);
+  const today = summarizeDay(babyEntries, dayKey(nowIso()));
+  const sleeping = !!runningSleep(babyEntries, baby.id);
+  const groups = groupByDay(babyEntries);
+  const age = ageLabel(baby.birth_date);
+
+  root.innerHTML = `
+    <div class="topbar">
+      <div>
+        <h1>${esc(baby.emoji)} ${esc(baby.name)}</h1>
+        <p class="muted tiny">${age ? `${esc(age)} old · ` : ""}shared caregiver log</p>
+      </div>
+      ${canManage() ? `<button class="btn btn-ghost btn-sm" data-add-baby>+ Child</button>` : ""}
+    </div>
+    ${babies.length > 1 ? `<div class="tabs">${babies.map((b) => `<button class="tab ${b.id === baby.id ? "active" : ""}" data-baby="${esc(b.id)}">${esc(b.emoji)} ${esc(b.name)}</button>`).join("")}</div>` : ""}
+    ${error ? `<div class="error">${esc(error)}</div>` : ""}
+    <div class="summary">
+      <div class="stat"><span class="v">${today.feedCount}</span><span class="k">Feeds today</span></div>
+      <div class="stat"><span class="v">${today.lastFeedAt ? esc(timeAgo(today.lastFeedAt)) : "—"}</span><span class="k">Last feed</span></div>
+      <div class="stat"><span class="v">${today.sleepMs ? esc(fmtDuration(today.sleepMs)) : "—"}${today.sleeping ? " 💤" : ""}</span><span class="k">Sleep today</span></div>
+    </div>
+    ${canManage() ? `
+      <div class="quick">
+        <button data-quick="feed"><span class="q-icon">🍼</span>Feed</button>
+        <button data-quick="diaper"><span class="q-icon">🧷</span>Diaper</button>
+        <button data-quick="sleep" class="${sleeping ? "sleeping" : ""}"><span class="q-icon">😴</span>${sleeping ? "End sleep" : "Sleep"}</button>
+        <button data-quick="more"><span class="q-icon">➕</span>More</button>
+      </div>` : `<p class="muted tiny" style="margin:10px 2px">Only adults can log entries.</p>`}
+    ${groups.length
+      ? groups.map((g) => `
+          <div class="day-head">${esc(dayLabel(g.key))}</div>
+          <div class="stack">${g.entries.map(renderEntry).join("")}</div>`).join("")
+      : `<div class="card empty">Nothing logged yet${canManage() ? " — tap a button above to start" : ""}.</div>`}
+  `;
+
+  // Keep the running-sleep total ticking without a full data reload.
+  clearInterval(tickTimer);
+  if (sleeping) tickTimer = setInterval(render, 60000);
+}
+
+/* ── Modals ────────────────────────────────────────────────────────────────── */
+function openModal(html) {
+  closeModal();
+  modalEl = document.createElement("div");
+  modalEl.className = "overlay";
+  modalEl.innerHTML = `<div class="modal">${html}</div>`;
+  modalEl.addEventListener("click", (e) => { if (e.target === modalEl) closeModal(); });
+  document.body.appendChild(modalEl);
+}
+function closeModal() { modalEl?.remove(); modalEl = null; }
+
+function localDatetimeValue(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function openBabyEditor() {
+  openModal(`
+    <h2>Add a child</h2>
+    <form class="form" id="baby-form">
+      <div class="field"><label for="b-name">Name</label><input id="b-name" data-autofocus required /></div>
+      <div class="field"><label for="b-dob">Birth date</label><input id="b-dob" type="date" required /></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
+        <button type="submit" class="btn">Add</button>
+      </div>
+    </form>`);
+  modalEl.querySelector("[data-autofocus]")?.focus();
+  modalEl.querySelector("#baby-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = document.getElementById("b-name").value.trim();
+    const dob = document.getElementById("b-dob").value;
+    if (!name) { document.getElementById("b-name").focus(); return; }
+    const btn = modalEl?.querySelector('button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
+    addBaby({ name, birth_date: dob }).catch((err) => showError(err.message));
+  });
+}
+
+function openEntryEditor(existing, presetType) {
+  const e = existing ?? null;
+  const type = e?.entry_type ?? presetType ?? "feed";
+  const typeOptions = ENTRY_TYPES.map((t) => `<option value="${t.value}" ${t.value === type ? "selected" : ""}>${t.icon} ${t.label}</option>`).join("");
+  openModal(`
+    <h2>${e ? "Edit entry" : "Log " + esc(typeMeta(type).label.toLowerCase())}</h2>
+    <form class="form" id="entry-form">
+      <div class="field"><label for="f-type">Type</label><select id="f-type">${typeOptions}</select></div>
+      <div class="grid2">
+        <div class="field"><label for="f-start">Started</label><input id="f-start" type="datetime-local" value="${esc(localDatetimeValue(e?.started_at))}" required /></div>
+        <div class="field" data-show="sleep pump"><label for="f-end">Ended</label><input id="f-end" type="datetime-local" value="${e?.ended_at ? esc(localDatetimeValue(e.ended_at)) : ""}" /></div>
+      </div>
+      <div class="grid2">
+        <div class="field" data-show="feed"><label for="f-feedkind">How</label>
+          <select id="f-feedkind">
+            ${["bottle", "nurse-left", "nurse-right", "solids"].map((k) => `<option value="${k}" ${e?.feed_kind === k ? "selected" : ""}>${feedKindLabel(k)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field" data-show="feed pump"><label for="f-amount">Amount (ml)</label><input id="f-amount" type="number" min="0" max="2000" value="${esc(e?.amount_ml ?? "")}" /></div>
+        <div class="field" data-show="diaper"><label for="f-diaperkind">Diaper</label>
+          <select id="f-diaperkind">
+            ${["wet", "dirty", "both"].map((k) => `<option value="${k}" ${e?.diaper_kind === k ? "selected" : ""}>${diaperKindLabel(k)}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+      <div class="field"><label for="f-note">Note <span class="muted" style="text-transform:none">(optional)</span></label><textarea id="f-note">${esc(e?.note ?? "")}</textarea></div>
+      <div class="modal-actions">
+        ${e ? `<button type="button" class="btn btn-danger modal-left" data-delete="${esc(e.id)}">Delete</button>` : ""}
+        <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
+        <button type="submit" class="btn">${e ? "Save" : "Log it"}</button>
+      </div>
+    </form>`);
+
+  const applyVisibility = () => {
+    const t = modalEl.querySelector("#f-type").value;
+    modalEl.querySelectorAll("[data-show]").forEach((el) => {
+      el.style.display = el.getAttribute("data-show").split(" ").includes(t) ? "" : "none";
+    });
+  };
+  applyVisibility();
+  modalEl.querySelector("#f-type").addEventListener("change", applyVisibility);
+
+  modalEl.querySelector("#entry-form").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const entryType = document.getElementById("f-type").value;
+    const startRaw = document.getElementById("f-start").value;
+    if (!startRaw) { document.getElementById("f-start").focus(); return; }
+    const endRaw = document.getElementById("f-end")?.value ?? "";
+    const showsEnd = ["sleep", "pump"].includes(entryType);
+    const amountRaw = document.getElementById("f-amount")?.value ?? "";
+    const amount = ["feed", "pump"].includes(entryType) && amountRaw !== "" ? Number(amountRaw) : null;
+    const startedAt = new Date(startRaw).toISOString();
+    const endedAt = showsEnd && endRaw ? new Date(endRaw).toISOString() : null;
+    if (endedAt && endedAt < startedAt) { showError("End time is before start time."); return; }
+    const btn = modalEl?.querySelector('button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+    saveEntry({
+      entry_type: entryType,
+      started_at: startedAt,
+      ended_at: endedAt,
+      amount_ml: Number.isFinite(amount) ? amount : null,
+      feed_kind: entryType === "feed" ? document.getElementById("f-feedkind").value : "",
+      diaper_kind: entryType === "diaper" ? document.getElementById("f-diaperkind").value : "",
+      note: document.getElementById("f-note").value.trim(),
+    }, e?.id ?? null).catch((err) => showError(err.message));
+  });
+}
+
+/* ── Events ────────────────────────────────────────────────────────────────── */
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button");
+  if (!t) return;
+  if (t.hasAttribute("data-baby")) { currentBabyId = t.getAttribute("data-baby"); render(); return; }
+  if (t.hasAttribute("data-add-baby")) { openBabyEditor(); return; }
+  if (t.hasAttribute("data-cancel")) { closeModal(); return; }
+  if (t.hasAttribute("data-edit")) { openEntryEditor(entries.find((x) => x.id === t.getAttribute("data-edit"))); return; }
+  if (t.hasAttribute("data-delete")) { deleteEntry(t.getAttribute("data-delete")); return; }
+  if (t.hasAttribute("data-quick")) {
+    const q = t.getAttribute("data-quick");
+    if (q === "sleep") { toggleSleep().catch((err) => showError(err.message)); return; }
+    if (q === "more") { openEntryEditor(null, "note"); return; }
+    openEntryEditor(null, q);
+  }
+});
+
+refresh();
+</script>
+</body>
+</html>
