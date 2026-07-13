@@ -50,3 +50,8 @@ CREATE INDEX IF NOT EXISTS app_baby_log__entries_baby_time_idx
 -- AI export + type-filtered summaries.
 CREATE INDEX IF NOT EXISTS app_baby_log__entries_type_idx
   ON app_baby_log__entries (entry_type, started_at);
+
+-- retain_days prunes by started_at; the maintenance DELETE needs a leading
+-- started_at index to page expired rows efficiently across all babies.
+CREATE INDEX IF NOT EXISTS app_baby_log__entries_started_idx
+  ON app_baby_log__entries (started_at);
