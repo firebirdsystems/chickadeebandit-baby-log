@@ -1,5 +1,6 @@
 {
   "id": "baby-log",
+  "contexts": ["household", "shared_space"],
   "name": "Baby Log",
   "version": "1.0.0",
   "description": "Track feeds, diapers, naps, and pumping for your baby — quick one-tap logging, a running sleep timer, and a daily summary every caregiver can see.",
