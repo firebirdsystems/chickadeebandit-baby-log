@@ -97,6 +97,13 @@
     .modal-actions { display: flex; gap: 8px; margin-top: 6px; justify-content: flex-end; }
     .modal-left { margin-right: auto; }
     @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } .quick { grid-template-columns: repeat(2, 1fr); } }
+    .search-row { margin-bottom: 12px; }
+    .search-input {
+      width: 100%; border: 1.5px solid var(--border-mid, var(--border, #d1d5db));
+      border-radius: 8px; padding: 9px 11px; font: inherit;
+      background: var(--surface, var(--card, #fff)); color: var(--text, inherit);
+    }
+    .search-input:focus { outline: none; border-color: var(--accent, #6366f1); }
   </style>
   <base href="/run/baby-log/">
 </head>
@@ -106,10 +113,10 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, hubConfirm } from "/hub-sdk.js";
+import { esc, isAdult, hubConfirm, searchMatch } from "/hub-sdk.js";
 import {
   ENTRY_TYPES, typeMeta, fmtDuration, timeAgo, dayKey, groupByDay,
-  summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel,
+  summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel, searchableFields,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -122,6 +129,7 @@ let me = null;
 let babies = [];
 let entries = [];
 let currentBabyId = null;
+let searchQ = "";       // in-app search (see logic.js searchableFields)
 let error = "";
 let modalEl = null;
 let tickTimer = null;
@@ -317,6 +325,16 @@ function renderEntry(e) {
     </div>`;
 }
 
+// render() rewrites the whole view, so put the caret back after typing.
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "search") return;
+  searchQ = e.target.value;
+  const caret = e.target.selectionStart;
+  render();
+  const next = document.getElementById("search");
+  if (next) { next.focus(); next.setSelectionRange(caret, caret); }
+});
+
 function render() {
   const root = document.getElementById("root");
   root.className = "app-root";
@@ -336,7 +354,11 @@ function render() {
   const babyEntries = entries.filter((e) => e.baby_id === baby.id);
   const today = summarizeDay(babyEntries, dayKey(nowIso()));
   const sleeping = !!runningSleep(babyEntries, baby.id);
-  const groups = groupByDay(babyEntries);
+  // Search narrows the entries before they are grouped, so empty days drop out.
+  const shownEntries = searchQ
+    ? babyEntries.filter((e) => searchMatch(searchQ, searchableFields(e)))
+    : babyEntries;
+  const groups = groupByDay(shownEntries);
   const age = ageLabel(baby.birth_date);
 
   root.innerHTML = `
@@ -361,11 +383,12 @@ function render() {
         <button data-quick="sleep" class="${sleeping ? "sleeping" : ""}"><span class="q-icon">😴</span>${sleeping ? "End sleep" : "Sleep"}</button>
         <button data-quick="more"><span class="q-icon">➕</span>More</button>
       </div>` : `<p class="muted tiny" style="margin:10px 2px">Only adults can log entries.</p>`}
+    ${babyEntries.length ? `<div class="search-row"><input id="search" class="search-input" type="search" placeholder="Search the log…" aria-label="Search the log" value="${esc(searchQ)}" /></div>` : ""}
     ${groups.length
       ? groups.map((g) => `
           <div class="day-head">${esc(dayLabel(g.key))}</div>
           <div class="stack">${g.entries.map(renderEntry).join("")}</div>`).join("")
-      : `<div class="card empty">Nothing logged yet${canManage() ? " — tap a button above to start" : ""}.</div>`}
+      : `<div class="card empty">${searchQ ? `Nothing matches "${esc(searchQ)}".` : `Nothing logged yet${canManage() ? " — tap a button above to start" : ""}.`}</div>`}
   `;
 
   // Keep the running-sleep total ticking without a full data reload.

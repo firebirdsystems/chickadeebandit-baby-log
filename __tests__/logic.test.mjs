@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   typeMeta, fmtDuration, timeAgo, dayKey, groupByDay, summarizeDay,
-  runningSleep, ageLabel, entryDetail,
+  runningSleep, ageLabel, entryDetail, searchableFields,
 } from "../src/logic.js";
 
 const T = (iso) => new Date(iso);
@@ -106,4 +106,12 @@ describe("entryDetail", () => {
 
 describe("typeMeta", () => {
   it("falls back to note", () => expect(typeMeta("bogus").value).toBe("note"));
+});
+
+describe("searchableFields", () => {
+  it("matches on the note, which is where anything unusual is written", () => {
+    const fields = searchableFields({ note: "spat up after the bottle", entry_type: "feed", feed_kind: "bottle", diaper_kind: "" });
+    expect(fields).toContain("spat up after the bottle");
+    expect(fields).toContain("bottle");
+  });
 });

@@ -146,3 +146,13 @@ export function feedKindLabel(kind) {
 export function diaperKindLabel(kind) {
   return { "wet": "Wet", "dirty": "Dirty", "both": "Wet + dirty" }[kind] ?? kind;
 }
+
+/**
+ * Fields the in-app search matches against (see hub-sdk `searchMatch`).
+ * The note is where anything unusual gets written ("spat up after the
+ * bottle"), and that is what gets looked for later — often to repeat it
+ * to a doctor. Entry/feed/diaper kinds are matchable too.
+ */
+export function searchableFields(item) {
+  return [item.note, item.entry_type, item.feed_kind, item.diaper_kind];
+}
