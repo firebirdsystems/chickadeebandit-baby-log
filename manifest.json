@@ -31,6 +31,16 @@
       }
     }
   },
+  "member_references": {
+    "babies": {
+      "column": "created_by",
+      "on_removed": "keep"
+    },
+    "entries": {
+      "column": "created_by",
+      "on_removed": "keep"
+    }
+  },
   "nav": { "label": "Baby Log" },
   "resource_limits": {
     "max_db_bytes": 52428800
