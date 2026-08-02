@@ -41,7 +41,18 @@
       "on_removed": "keep"
     }
   },
+  "publishes": ["baby.entry_logged"],
+  "publish_acls": {
+    "baby.entry_logged": { "require_role": "adult" }
+  },
   "nav": { "label": "Baby Log" },
+  "glance": {
+    "source": {
+      "kind": "sql",
+      "query": "SELECT b.name AS title, e.entry_type AS subtitle, e.started_at AS at FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 ORDER BY e.started_at DESC LIMIT 3"
+    },
+    "display": { "template": "list", "title": "title", "subtitle": "subtitle", "when": "at" }
+  },
   "resource_limits": {
     "max_db_bytes": 52428800
   },

@@ -122,6 +122,22 @@ import {
 const CONTEXT = window.__CONTEXT_URL ?? "";
 const DB = window.__DB_URL ?? "";
 const HUB_MEMBER = window.__CURRENT_MEMBER ?? null;
+const EVENTS = window.__EVENTS_URL ?? "";
+
+// Note the payload: entry_type and amounts only, never `note`. The free-text
+// note is the one field a parent may have written something private into.
+async function publishEvent(type, subjectId, payload = {}) {
+  if (!EVENTS) return;
+  try {
+    await fetch(EVENTS, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, subject_id: subjectId, payload }),
+    });
+  } catch {
+    // The entry is already saved and rendered; publishing is best-effort.
+  }
+}
 
 let members = [];
 let memberMap = new Map();
@@ -262,6 +278,12 @@ async function saveEntry(fields, existingId) {
         "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         [row.id, row.baby_id, row.entry_type, row.started_at, row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_at],
       );
+      await publishEvent("baby.entry_logged", row.id, {
+        baby_id: row.baby_id,
+        entry_type: row.entry_type,
+        started_at: row.started_at,
+        amount_ml: row.amount_ml,
+      });
     } catch (e) {
       entries = entries.filter((x) => x.id !== row.id);
       showError(e.message);
