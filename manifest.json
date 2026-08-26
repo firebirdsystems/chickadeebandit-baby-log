@@ -18,6 +18,9 @@
     "requires_approval": false
   },
   "storage": "db",
+  "preload": {
+    "babies": {"sql": "SELECT id, name, birth_date, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"}
+  },
   "db_plaintext_columns": ["entry_type", "birth_date"],
   "row_policies": {
     "babies": {
