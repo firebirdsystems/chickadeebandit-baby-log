@@ -1,5 +1,7 @@
 # Baby Log
 
+A [Chickadee Bandit](https://chickadeebandit.com/app-library/baby-log) app.
+
 Feed, diaper, sleep, and pumping log for the newborn/infant phase — quick
 one-tap logging, a running sleep timer, and a shared daily summary every
 caregiver can see.
