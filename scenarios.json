@@ -1,0 +1,117 @@
+{
+  "scenarios": [
+    {
+      "name": "every member can read the caregiver log, but only adults can write it",
+      "members": { "parent": "adult", "sibling": "child" },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": ["{{parent}}"]
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES ('e1', 'b1', 'feed', '2026-01-02T08:00:00Z', 90, 'bottle', ?, '2026-01-02T08:00:00Z')",
+          "params": ["{{parent}}"]
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "SELECT id FROM app_baby_log__entries",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "e1" }] }
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, created_by, created_at) VALUES ('e2', 'b1', 'diaper', '2026-01-02T09:00:00Z', ?, '2026-01-02T09:00:00Z')",
+          "params": ["{{sibling}}"],
+          "expect": { "status": 403 }
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "UPDATE app_baby_log__babies SET archived = 1 WHERE id = 'b1'",
+          "expect": { "status": 403 }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, created_by, created_at) VALUES ('e3', 'b1', 'diaper', '2026-01-02T09:30:00Z', ?, '2026-01-02T09:30:00Z')",
+          "params": ["{{parent}}"],
+          "expect": { "status": 200 }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__entries WHERE baby_id = 'b1'",
+          "expect": { "status": 200, "rowCount": 2 }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT archived FROM app_baby_log__babies WHERE id = 'b1'",
+          "expect": { "status": 200, "rowsContain": [{ "archived": 0 }] }
+        }
+      ]
+    },
+    {
+      "name": "the AI exports return seeded babies and the entry log newest first",
+      "members": { "parent": "adult" },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": ["{{parent}}"]
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, created_by, created_at) VALUES ('e_old', 'b1', 'sleep', '2026-01-02T01:00:00Z', '2026-01-02T03:00:00Z', NULL, ?, '2026-01-02T01:00:00Z'), ('e_new', 'b1', 'feed', '2026-01-02T05:00:00Z', NULL, 120, ?, '2026-01-02T05:00:00Z')",
+          "params": ["{{parent}}", "{{parent}}"]
+        },
+        {
+          "action": "named",
+          "as": "parent",
+          "kind": "query",
+          "name": "babies",
+          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "b1", "name": "Juniper", "birth_date": "2025-12-01" }] }
+        },
+        {
+          "action": "named",
+          "as": "parent",
+          "kind": "query",
+          "name": "recent_entries",
+          "expect": {
+            "status": 200,
+            "rowCount": 2,
+            "rowsContain": [
+              { "id": "e_new", "entry_type": "feed", "amount_ml": 120 },
+              { "id": "e_old", "entry_type": "sleep", "ended_at": "2026-01-02T03:00:00Z" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "only an adult caregiver may publish baby.entry_logged",
+      "members": { "parent": "adult", "sibling": "child" },
+      "steps": [
+        {
+          "action": "publish",
+          "as": "sibling",
+          "type": "baby.entry_logged",
+          "subject_id": "e1",
+          "payload": { "baby_id": "b1", "entry_type": "feed", "started_at": "2026-01-02T08:00:00Z", "amount_ml": 90 },
+          "expect": { "status": 403 }
+        },
+        {
+          "action": "publish",
+          "as": "parent",
+          "type": "baby.entry_logged",
+          "subject_id": "e1",
+          "payload": { "baby_id": "b1", "entry_type": "feed", "started_at": "2026-01-02T08:00:00Z", "amount_ml": 90 },
+          "expect": { "status": 201 }
+        }
+      ]
+    }
+  ]
+}
