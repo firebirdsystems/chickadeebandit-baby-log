@@ -4,17 +4,17 @@
  */
 
 export const ENTRY_TYPES = [
-  { value: "feed",   label: "Feed",   icon: "🍼" },
-  { value: "diaper", label: "Diaper", icon: "🧷" },
-  { value: "sleep",  label: "Sleep",  icon: "😴" },
-  { value: "pump",   label: "Pump",   icon: "🫙" },
-  { value: "note",   label: "Note",   icon: "📝" },
+  { value: "feed",   label: "Feed",   glyph: "bottle" },
+  { value: "diaper", label: "Diaper", glyph: "diaper" },
+  { value: "sleep",  label: "Sleep",  glyph: "moon" },
+  { value: "pump",   label: "Pump",   glyph: "jar" },
+  { value: "note",   label: "Note",   glyph: "note" },
 ];
 
 const TYPE_BY_VALUE = new Map(ENTRY_TYPES.map((t) => [t.value, t]));
 
 export function typeMeta(type) {
-  return TYPE_BY_VALUE.get(type) ?? { value: "note", label: "Note", icon: "📝" };
+  return TYPE_BY_VALUE.get(type) ?? { value: "note", label: "Note", glyph: "note" };
 }
 
 /** "2h 05m" / "45m" / "<1m" from a millisecond duration. Null-safe. */

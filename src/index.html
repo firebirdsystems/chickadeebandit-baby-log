@@ -113,7 +113,7 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, hubConfirm, searchMatch } from "/hub-sdk.js";
+import { esc, isAdult, hubConfirm, searchMatch, glyph } from "/hub-sdk.js";
 import {
   ENTRY_TYPES, typeMeta, fmtDuration, timeAgo, dayKey, groupByDay,
   summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel, searchableFields,
@@ -335,7 +335,7 @@ function renderEntry(e) {
   const detail = entryDetail(e);
   return `
     <div class="entry">
-      <div class="entry-icon" aria-hidden="true">${meta.icon}</div>
+      <div class="entry-icon" aria-hidden="true">${glyph(meta.glyph)}</div>
       <div class="entry-body">
         <div class="entry-title">${esc(meta.label)}${detail ? ` <span class="muted">· ${esc(detail)}</span>` : ""}</div>
         ${e.note ? `<div class="entry-meta">${esc(e.note)}</div>` : ""}
@@ -396,14 +396,14 @@ function render() {
     <div class="summary">
       <div class="stat"><span class="v">${today.feedCount}</span><span class="k">Feeds today</span></div>
       <div class="stat"><span class="v">${today.lastFeedAt ? esc(timeAgo(today.lastFeedAt)) : "—"}</span><span class="k">Last feed</span></div>
-      <div class="stat"><span class="v">${today.sleepMs ? esc(fmtDuration(today.sleepMs)) : "—"}${today.sleeping ? " 💤" : ""}</span><span class="k">Sleep today</span></div>
+      <div class="stat"><span class="v">${today.sleepMs ? esc(fmtDuration(today.sleepMs)) : "—"}${today.sleeping ? ` ${glyph("moon")}` : ""}</span><span class="k">Sleep today</span></div>
     </div>
     ${canManage() ? `
       <div class="quick">
-        <button data-quick="feed"><span class="q-icon">🍼</span>Feed</button>
-        <button data-quick="diaper"><span class="q-icon">🧷</span>Diaper</button>
-        <button data-quick="sleep" class="${sleeping ? "sleeping" : ""}"><span class="q-icon">😴</span>${sleeping ? "End sleep" : "Sleep"}</button>
-        <button data-quick="more"><span class="q-icon">➕</span>More</button>
+        <button data-quick="feed"><span class="q-icon">${glyph("bottle")}</span>Feed</button>
+        <button data-quick="diaper"><span class="q-icon">${glyph("diaper")}</span>Diaper</button>
+        <button data-quick="sleep" class="${sleeping ? "sleeping" : ""}"><span class="q-icon">${glyph("moon")}</span>${sleeping ? "End sleep" : "Sleep"}</button>
+        <button data-quick="more"><span class="q-icon">${glyph("plus")}</span>More</button>
       </div>` : `<p class="muted tiny" style="margin:10px 2px">Only adults can log entries.</p>`}
     ${babyEntries.length ? `<div class="search-row"><input id="search" class="search-input" type="search" placeholder="Search the log…" aria-label="Search the log" value="${esc(searchQ)}" /></div>` : ""}
     ${groups.length
@@ -462,7 +462,7 @@ function openBabyEditor() {
 function openEntryEditor(existing, presetType) {
   const e = existing ?? null;
   const type = e?.entry_type ?? presetType ?? "feed";
-  const typeOptions = ENTRY_TYPES.map((t) => `<option value="${t.value}" ${t.value === type ? "selected" : ""}>${t.icon} ${t.label}</option>`).join("");
+  const typeOptions = ENTRY_TYPES.map((t) => `<option value="${t.value}" ${t.value === type ? "selected" : ""}>${t.label}</option>`).join("");
   openModal(`
     <h2>${e ? "Edit entry" : "Log " + esc(typeMeta(type).label.toLowerCase())}</h2>
     <form class="form" id="entry-form">
