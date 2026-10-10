@@ -19,7 +19,8 @@
   },
   "storage": "db",
   "preload": {
-    "babies": {"sql": "SELECT id, name, birth_date, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"}
+    "babies": {"sql": "SELECT id, name, birth_date, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"},
+    "entries": {"sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"}
   },
   "db_plaintext_columns": ["entry_type", "birth_date"],
   "row_policies": {

@@ -1,0 +1,493 @@
+{
+ "seed": [
+  {
+   "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES (?, ?, date('now','-74 days'), ?, 0, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-73 days'))",
+   "params": [
+    "baby-willow",
+    "Willow",
+    "👶",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES (?, ?, date('now','-74 days'), ?, 0, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-73 days','+1 minutes'))",
+   "params": [
+    "baby-theo",
+    "Theo",
+    "👶",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-35 minutes'), 110, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-34 minutes'))",
+   "params": [
+    "en-1",
+    "baby-willow",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-50 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-49 minutes'))",
+   "params": [
+    "en-2",
+    "baby-willow",
+    "diaper",
+    "wet",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-190 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-65 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-64 minutes'))",
+   "params": [
+    "en-3",
+    "baby-willow",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, feed_kind, note, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-215 minutes'), ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-214 minutes'))",
+   "params": [
+    "en-4",
+    "baby-willow",
+    "feed",
+    "nurse-left",
+    "About 15 minutes",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-230 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-229 minutes'))",
+   "params": [
+    "en-5",
+    "baby-willow",
+    "diaper",
+    "both",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-300 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-280 minutes'), 90, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-279 minutes'))",
+   "params": [
+    "en-6",
+    "baby-willow",
+    "pump",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-420 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-325 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-324 minutes'))",
+   "params": [
+    "en-7",
+    "baby-willow",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-440 minutes'), 120, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-439 minutes'))",
+   "params": [
+    "en-8",
+    "baby-willow",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-455 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-454 minutes'))",
+   "params": [
+    "en-9",
+    "baby-willow",
+    "diaper",
+    "wet",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, note, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-520 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-519 minutes'))",
+   "params": [
+    "en-10",
+    "baby-willow",
+    "note",
+    "Fussy after the morning feed, settled with the swing",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-650 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-649 minutes'))",
+   "params": [
+    "en-11",
+    "baby-willow",
+    "feed",
+    "nurse-right",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, note, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1010 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-670 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-669 minutes'))",
+   "params": [
+    "en-12",
+    "baby-willow",
+    "sleep",
+    "Longest stretch yet",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1020 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1019 minutes'))",
+   "params": [
+    "en-13",
+    "baby-willow",
+    "diaper",
+    "dirty",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1035 minutes'), 130, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1034 minutes'))",
+   "params": [
+    "en-14",
+    "baby-willow",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1100 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-1075 minutes'), 120, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1074 minutes'))",
+   "params": [
+    "en-15",
+    "baby-willow",
+    "pump",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1230 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1229 minutes'))",
+   "params": [
+    "en-16",
+    "baby-willow",
+    "feed",
+    "nurse-left",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1245 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1244 minutes'))",
+   "params": [
+    "en-17",
+    "baby-willow",
+    "diaper",
+    "wet",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1400 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-1290 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1289 minutes'))",
+   "params": [
+    "en-18",
+    "baby-willow",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1425 minutes'), 100, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1424 minutes'))",
+   "params": [
+    "en-19",
+    "baby-willow",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1600 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1599 minutes'))",
+   "params": [
+    "en-20",
+    "baby-willow",
+    "diaper",
+    "both",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1640 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1639 minutes'))",
+   "params": [
+    "en-21",
+    "baby-willow",
+    "feed",
+    "nurse-right",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1820 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-1670 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1669 minutes'))",
+   "params": [
+    "en-22",
+    "baby-willow",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1850 minutes'), 115, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1849 minutes'))",
+   "params": [
+    "en-23",
+    "baby-willow",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, note, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1900 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1899 minutes'))",
+   "params": [
+    "en-24",
+    "baby-willow",
+    "note",
+    "Pediatrician: 5.1 kg, right on her curve",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1960 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1959 minutes'))",
+   "params": [
+    "en-25",
+    "baby-willow",
+    "diaper",
+    "wet",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-2080 minutes'), 120, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-2079 minutes'))",
+   "params": [
+    "en-26",
+    "baby-willow",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-20 minutes'), 125, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-19 minutes'))",
+   "params": [
+    "en-27",
+    "baby-theo",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-15 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-14 minutes'))",
+   "params": [
+    "en-28",
+    "baby-theo",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-40 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-39 minutes'))",
+   "params": [
+    "en-29",
+    "baby-theo",
+    "diaper",
+    "dirty",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-205 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-65 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-64 minutes'))",
+   "params": [
+    "en-30",
+    "baby-theo",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-225 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-224 minutes'))",
+   "params": [
+    "en-31",
+    "baby-theo",
+    "feed",
+    "nurse-right",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-240 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-239 minutes'))",
+   "params": [
+    "en-32",
+    "baby-theo",
+    "diaper",
+    "wet",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-430 minutes'), 130, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-429 minutes'))",
+   "params": [
+    "en-33",
+    "baby-theo",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-600 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-480 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-479 minutes'))",
+   "params": [
+    "en-34",
+    "baby-theo",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-640 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-639 minutes'))",
+   "params": [
+    "en-35",
+    "baby-theo",
+    "diaper",
+    "both",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, feed_kind, note, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-660 minutes'), ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-659 minutes'))",
+   "params": [
+    "en-36",
+    "baby-theo",
+    "feed",
+    "nurse-left",
+    "Sleepy latch",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1000 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-700 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-699 minutes'))",
+   "params": [
+    "en-37",
+    "baby-theo",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1040 minutes'), 135, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1039 minutes'))",
+   "params": [
+    "en-38",
+    "baby-theo",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1050 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1049 minutes'))",
+   "params": [
+    "en-39",
+    "baby-theo",
+    "diaper",
+    "wet",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, note, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1200 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1199 minutes'))",
+   "params": [
+    "en-40",
+    "baby-theo",
+    "note",
+    "Spit up more than usual after the evening bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1240 minutes'), 110, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1239 minutes'))",
+   "params": [
+    "en-41",
+    "baby-theo",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1420 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1419 minutes'))",
+   "params": [
+    "en-42",
+    "baby-theo",
+    "diaper",
+    "dirty",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1650 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1649 minutes'))",
+   "params": [
+    "en-43",
+    "baby-theo",
+    "feed",
+    "nurse-right",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1830 minutes'), strftime('%Y-%m-%dT%H:%M:%fZ','now','-1670 minutes'), ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1669 minutes'))",
+   "params": [
+    "en-44",
+    "baby-theo",
+    "sleep",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1860 minutes'), 120, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1859 minutes'))",
+   "params": [
+    "en-45",
+    "baby-theo",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1975 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-1974 minutes'))",
+   "params": [
+    "en-46",
+    "baby-theo",
+    "diaper",
+    "wet",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-2090 minutes'), 125, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-2089 minutes'))",
+   "params": [
+    "en-47",
+    "baby-theo",
+    "feed",
+    "bottle",
+    "{{me}}"
+   ]
+  },
+  {
+   "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, diaper_kind, created_by, created_at) VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-2100 minutes'), ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now','-2099 minutes'))",
+   "params": [
+    "en-48",
+    "baby-theo",
+    "diaper",
+    "both",
+    "{{me}}"
+   ]
+  }
+ ]
+}
