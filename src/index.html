@@ -97,6 +97,8 @@
     .modal-actions { display: flex; gap: 8px; margin-top: 6px; justify-content: flex-end; }
     .modal-left { margin-right: auto; }
     @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } .quick { grid-template-columns: repeat(2, 1fr); } }
+    .load-error { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--hub-tint-danger, #fee2e2); color: var(--hub-tint-danger-fg, #b91c1c); font-size: 0.9rem; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+    .load-error-retry { background: none; border: 1px solid currentColor; border-radius: 8px; padding: 5px 10px; font: inherit; font-weight: 600; color: inherit; cursor: pointer; flex-shrink: 0; }
     .search-row { margin-bottom: 12px; }
     .search-input {
       width: 100%; border: 1.5px solid var(--border-mid, var(--border, #d1d5db));
@@ -147,6 +149,7 @@ let entries = [];
 let currentBabyId = null;
 let searchQ = "";       // in-app search (see logic.js searchableFields)
 let error = "";
+let loadFailed = false; // the first load failed: nothing below is known, so nothing is shown as empty
 let modalEl = null;
 let tickTimer = null;
 
@@ -162,8 +165,8 @@ async function db(sql, params = []) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sql, params }),
   });
-  const json = await res.json();
-  if (json.error) throw new Error(json.error);
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || typeof json !== "object" || json.error) throw new Error(json?.error || "Couldn’t reach the hub. Try again.");
   return json;
 }
 
@@ -175,10 +178,13 @@ async function loadMembers() {
       { id: "demo-2", name: "Jordan", role: "adult" },
     ];
   } else {
-    try {
-      const res = await fetch(`${CONTEXT}?keys=family.members`);
-      members = ((await res.json())["family.members"]) ?? [];
-    } catch { members = []; }
+    // A failed read is a failed load, never an empty household.
+    const res = await fetch(`${CONTEXT}?keys=family.members`);
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || typeof data !== "object") throw new Error("Couldn’t load members");
+    // A 200 can still name a key the hub failed to read: that is a failed load too.
+    if (Array.isArray(data.$errors) && data.$errors.includes("family.members")) throw new Error("Couldn’t load members");
+    members = data["family.members"] ?? [];
   }
   memberMap = new Map(members.map((m) => [m.id, m]));
   me = HUB_MEMBER ?? members[0] ?? { id: "guest", name: "Guest", role: "adult" };
@@ -215,8 +221,9 @@ async function refresh() {
   try {
     await Promise.all([loadMembers(), loadBabies(), loadEntries()]);
     if (!currentBabyId || !babies.some((b) => b.id === currentBabyId)) currentBabyId = babies[0]?.id ?? null;
+    loadFailed = false;
     render();
-  } catch (e) { error = e.message; render(); }
+  } catch { loadFailed = true; render(); }
 }
 
 function showError(msg) { error = msg; render(); }
@@ -360,6 +367,13 @@ document.addEventListener("input", (e) => {
 function render() {
   const root = document.getElementById("root");
   root.className = "app-root";
+
+  if (loadFailed) {
+    root.innerHTML = `
+      <div class="topbar"><h1>Baby Log</h1></div>
+      <div class="load-error" data-testid="load-error" role="alert"><span>Couldn’t load the baby log.</span> <button type="button" class="load-error-retry" data-testid="load-retry">Try again</button></div>`;
+    return;
+  }
 
   if (!babies.length) {
     root.innerHTML = `
@@ -531,6 +545,7 @@ function openEntryEditor(existing, presetType) {
 document.addEventListener("click", (e) => {
   const t = e.target.closest("button");
   if (!t) return;
+  if (t.matches('[data-testid="load-retry"]')) { refresh(); return; }
   if (t.hasAttribute("data-baby")) { currentBabyId = t.getAttribute("data-baby"); render(); return; }
   if (t.hasAttribute("data-add-baby")) { openBabyEditor(); return; }
   if (t.hasAttribute("data-cancel")) { closeModal(); return; }
