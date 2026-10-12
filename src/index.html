@@ -228,21 +228,32 @@ async function refresh() {
 
 function showError(msg) { error = msg; render(); }
 
+// A save the hub refused: the form stays open as typed, says so in its own
+// error line, and its button works again. With no form open (the sleep
+// timer), the page's error line carries the message instead.
+function saveFailed() {
+  const line = modalEl?.querySelector("[data-form-error]");
+  if (!line) { showError("Couldn’t save — try again."); return; }
+  line.textContent = "Couldn’t save — try again.";
+  line.hidden = false;
+  const btn = modalEl.querySelector('button[type="submit"]');
+  if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label ?? btn.textContent; }
+}
+
 /* ── Mutations ─────────────────────────────────────────────────────────────── */
 async function addBaby(fields) {
   const row = { id: crypto.randomUUID(), name: fields.name, birth_date: fields.birth_date, emoji: "👶", archived: 0, created_by: me.id, created_at: nowIso() };
-  babies = [...babies, row];
-  currentBabyId = row.id;
-  closeModal();
-  render();
+  // The form stays open until the hub has the child: nothing is drawn for a
+  // row the hub never got.
   try {
     await db("INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES (?,?,?,?,0,?,?)",
       [row.id, row.name, row.birth_date, row.emoji, row.created_by, row.created_at]);
-  } catch (e) {
-    babies = babies.filter((b) => b.id !== row.id);
-    currentBabyId = babies[0]?.id ?? null;
-    showError(e.message);
-  }
+  } catch { saveFailed(); return; }
+  babies = [...babies, row];
+  currentBabyId = row.id;
+  error = "";
+  closeModal();
+  render();
 }
 
 async function archiveBaby(id) {
@@ -255,46 +266,43 @@ async function archiveBaby(id) {
   render();
   try {
     await db("UPDATE app_baby_log__babies SET archived = 1 WHERE id = ?", [id]);
-  } catch (e) { babies = prev; showError(e.message); }
+  } catch (e) { console.error(e); babies = prev; showError("Couldn’t archive the child — try again."); }
 }
 
 async function saveEntry(fields, existingId) {
   const now = nowIso();
   if (existingId) {
-    const idx = entries.findIndex((e) => e.id === existingId);
-    const prev = idx !== -1 ? entries[idx] : null;
-    if (idx !== -1) entries[idx] = { ...entries[idx], ...fields };
-    closeModal();
-    render();
+    // The form stays open until the hub has the edit (see saveFailed).
     try {
       await db(
         "UPDATE app_baby_log__entries SET entry_type=?, started_at=?, ended_at=?, amount_ml=?, feed_kind=?, diaper_kind=?, note=? WHERE id=?",
         [fields.entry_type, fields.started_at, fields.ended_at, fields.amount_ml, fields.feed_kind, fields.diaper_kind, fields.note, existingId],
       );
-    } catch (e) {
-      if (idx !== -1 && prev) entries[idx] = prev;
-      showError(e.message);
-    }
-  } else {
-    const row = { id: crypto.randomUUID(), baby_id: currentBabyId, ...fields, created_by: me.id, created_at: now };
-    entries = [row, ...entries];
+    } catch { saveFailed(); return; }
+    const idx = entries.findIndex((e) => e.id === existingId);
+    if (idx !== -1) entries[idx] = { ...entries[idx], ...fields };
+    error = "";
     closeModal();
     render();
+  } else {
+    const row = { id: crypto.randomUUID(), baby_id: currentBabyId, ...fields, created_by: me.id, created_at: now };
     try {
       await db(
         "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         [row.id, row.baby_id, row.entry_type, row.started_at, row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_at],
       );
-      await publishEvent("baby.entry_logged", row.id, {
-        baby_id: row.baby_id,
-        entry_type: row.entry_type,
-        started_at: row.started_at,
-        amount_ml: row.amount_ml,
-      });
-    } catch (e) {
-      entries = entries.filter((x) => x.id !== row.id);
-      showError(e.message);
-    }
+    } catch { saveFailed(); return; }
+    entries = [row, ...entries];
+    error = "";
+    closeModal();
+    render();
+    // Only once the entry exists; a failed publish is not a failed save.
+    await publishEvent("baby.entry_logged", row.id, {
+      baby_id: row.baby_id,
+      entry_type: row.entry_type,
+      started_at: row.started_at,
+      amount_ml: row.amount_ml,
+    });
   }
 }
 
@@ -306,7 +314,7 @@ async function deleteEntry(id) {
   closeModal();
   render();
   try { await db("DELETE FROM app_baby_log__entries WHERE id = ?", [id]); }
-  catch (e) { entries = prev; showError(e.message); }
+  catch (e) { console.error(e); entries = prev; showError("Couldn’t delete the entry — try again."); }
 }
 
 /** Toggle the sleep timer: start a running entry, or stamp ended_at on it. */
@@ -319,7 +327,7 @@ async function toggleSleep() {
     entries[idx] = { ...running, ended_at: endedAt };
     render();
     try { await db("UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ?", [endedAt, running.id]); }
-    catch (e) { entries[idx] = prev; showError(e.message); }
+    catch (e) { console.error(e); entries[idx] = prev; showError("Couldn’t stop the sleep timer — try again."); }
   } else {
     await saveEntry({ entry_type: "sleep", started_at: nowIso(), ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "", note: "" }, null);
   }
@@ -456,6 +464,7 @@ function openBabyEditor() {
     <form class="form" id="baby-form">
       <div class="field"><label for="b-name">Name</label><input id="b-name" data-autofocus required /></div>
       <div class="field"><label for="b-dob">Birth date</label><input id="b-dob" type="date" required /></div>
+      <div class="error" data-form-error data-testid="modal-error" role="alert" hidden></div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
         <button type="submit" class="btn">Add</button>
@@ -468,8 +477,8 @@ function openBabyEditor() {
     const dob = document.getElementById("b-dob").value;
     if (!name) { document.getElementById("b-name").focus(); return; }
     const btn = modalEl?.querySelector('button[type="submit"]');
-    if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
-    addBaby({ name, birth_date: dob }).catch((err) => showError(err.message));
+    if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Adding…"; }
+    addBaby({ name, birth_date: dob }).catch(() => saveFailed());
   });
 }
 
@@ -499,6 +508,7 @@ function openEntryEditor(existing, presetType) {
         </div>
       </div>
       <div class="field"><label for="f-note">Note <span class="muted" style="text-transform:none">(optional)</span></label><textarea id="f-note">${esc(e?.note ?? "")}</textarea></div>
+      <div class="error" data-form-error data-testid="modal-error" role="alert" hidden></div>
       <div class="modal-actions">
         ${e ? `<button type="button" class="btn btn-danger modal-left" data-delete="${esc(e.id)}">Delete</button>` : ""}
         <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
@@ -528,7 +538,7 @@ function openEntryEditor(existing, presetType) {
     const endedAt = showsEnd && endRaw ? new Date(endRaw).toISOString() : null;
     if (endedAt && endedAt < startedAt) { showError("End time is before start time."); return; }
     const btn = modalEl?.querySelector('button[type="submit"]');
-    if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+    if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Saving…"; }
     saveEntry({
       entry_type: entryType,
       started_at: startedAt,
@@ -537,7 +547,7 @@ function openEntryEditor(existing, presetType) {
       feed_kind: entryType === "feed" ? document.getElementById("f-feedkind").value : "",
       diaper_kind: entryType === "diaper" ? document.getElementById("f-diaperkind").value : "",
       note: document.getElementById("f-note").value.trim(),
-    }, e?.id ?? null).catch((err) => showError(err.message));
+    }, e?.id ?? null).catch(() => saveFailed());
   });
 }
 
@@ -553,7 +563,7 @@ document.addEventListener("click", (e) => {
   if (t.hasAttribute("data-delete")) { deleteEntry(t.getAttribute("data-delete")); return; }
   if (t.hasAttribute("data-quick")) {
     const q = t.getAttribute("data-quick");
-    if (q === "sleep") { toggleSleep().catch((err) => showError(err.message)); return; }
+    if (q === "sleep") { toggleSleep().catch((err) => { console.error(err); showError("Couldn’t save — try again."); }); return; }
     if (q === "more") { openEntryEditor(null, "note"); return; }
     openEntryEditor(null, q);
   }
