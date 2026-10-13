@@ -536,7 +536,10 @@ function openEntryEditor(existing, presetType) {
     const amount = ["feed", "pump"].includes(entryType) && amountRaw !== "" ? Number(amountRaw) : null;
     const startedAt = new Date(startRaw).toISOString();
     const endedAt = showsEnd && endRaw ? new Date(endRaw).toISOString() : null;
-    if (endedAt && endedAt < startedAt) { showError("End time is before start time."); return; }
+    // Said in the form's own error line: the page's line is under the overlay.
+    const line = ev.currentTarget.querySelector("[data-form-error]");
+    if (endedAt && endedAt < startedAt) { line.textContent = "End time is before start time."; line.hidden = false; return; }
+    line.hidden = true;
     const btn = modalEl?.querySelector('button[type="submit"]');
     if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Saving…"; }
     saveEntry({
