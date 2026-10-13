@@ -475,7 +475,9 @@ function openBabyEditor() {
     e.preventDefault();
     const name = document.getElementById("b-name").value.trim();
     const dob = document.getElementById("b-dob").value;
-    if (!name) { document.getElementById("b-name").focus(); return; }
+    const line = e.currentTarget.querySelector("[data-form-error]");
+    if (!name) { line.textContent = "Enter a name."; line.hidden = false; document.getElementById("b-name").focus(); return; }
+    line.hidden = true;
     const btn = modalEl?.querySelector('button[type="submit"]');
     if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Adding…"; }
     addBaby({ name, birth_date: dob }).catch(() => saveFailed());
@@ -534,10 +536,14 @@ function openEntryEditor(existing, presetType) {
     const showsEnd = ["sleep", "pump"].includes(entryType);
     const amountRaw = document.getElementById("f-amount")?.value ?? "";
     const amount = ["feed", "pump"].includes(entryType) && amountRaw !== "" ? Number(amountRaw) : null;
-    const startedAt = new Date(startRaw).toISOString();
-    const endedAt = showsEnd && endRaw ? new Date(endRaw).toISOString() : null;
     // Said in the form's own error line: the page's line is under the overlay.
     const line = ev.currentTarget.querySelector("[data-form-error]");
+    const start = new Date(startRaw);
+    const end = showsEnd && endRaw ? new Date(endRaw) : null;
+    // toISOString throws on a date it could not parse.
+    if (Number.isNaN(start.getTime()) || (end && Number.isNaN(end.getTime()))) { line.textContent = "Enter a valid date and time."; line.hidden = false; return; }
+    const startedAt = start.toISOString();
+    const endedAt = end ? end.toISOString() : null;
     if (endedAt && endedAt < startedAt) { line.textContent = "End time is before start time."; line.hidden = false; return; }
     line.hidden = true;
     const btn = modalEl?.querySelector('button[type="submit"]');
