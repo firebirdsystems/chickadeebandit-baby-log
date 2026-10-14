@@ -118,7 +118,7 @@
 import { esc, isAdult, hubConfirm, searchMatch, glyph } from "/hub-sdk.js";
 import {
   ENTRY_TYPES, typeMeta, fmtDuration, timeAgo, dayKey, groupByDay,
-  summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel, searchableFields,
+  summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel, searchableFields, failureLine,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -166,7 +166,7 @@ async function db(sql, params = []) {
     body: JSON.stringify({ sql, params }),
   });
   const json = await res.json().catch(() => null);
-  if (!res.ok || !json || typeof json !== "object" || json.error) throw new Error(json?.error || "Couldn’t reach the hub. Try again.");
+  if (!res.ok || !json || typeof json !== "object" || json.error) throw Object.assign(new Error(json?.error || "Couldn’t reach the hub. Try again."), { status: res.status, code: json?.code });
   return json;
 }
 
@@ -231,10 +231,12 @@ function showError(msg) { error = msg; render(); }
 // A save the hub refused: the form stays open as typed, says so in its own
 // error line, and its button works again. With no form open (the sleep
 // timer), the page's error line carries the message instead.
-function saveFailed() {
+function saveFailed(e, words) {
+  if (e) console.error(e);
+  const text = failureLine(e, words);
   const line = modalEl?.querySelector("[data-form-error]");
-  if (!line) { showError("Couldn’t save — try again."); return; }
-  line.textContent = "Couldn’t save — try again.";
+  if (!line) { showError(text); return; }
+  line.textContent = text;
   line.hidden = false;
   const btn = modalEl.querySelector('button[type="submit"]');
   if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label ?? btn.textContent; }
@@ -248,7 +250,7 @@ async function addBaby(fields) {
   try {
     await db("INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES (?,?,?,?,0,?,?)",
       [row.id, row.name, row.birth_date, row.emoji, row.created_by, row.created_at]);
-  } catch { saveFailed(); return; }
+  } catch (e) { saveFailed(e, { action: "add the child", thing: "child" }); return; }
   babies = [...babies, row];
   currentBabyId = row.id;
   error = "";
@@ -266,7 +268,7 @@ async function archiveBaby(id) {
   render();
   try {
     await db("UPDATE app_baby_log__babies SET archived = 1 WHERE id = ?", [id]);
-  } catch (e) { console.error(e); babies = prev; showError("Couldn’t archive the child — try again."); }
+  } catch (e) { console.error(e); babies = prev; showError(failureLine(e, { action: "archive the child", thing: "child" })); }
 }
 
 async function saveEntry(fields, existingId) {
@@ -278,7 +280,7 @@ async function saveEntry(fields, existingId) {
         "UPDATE app_baby_log__entries SET entry_type=?, started_at=?, ended_at=?, amount_ml=?, feed_kind=?, diaper_kind=?, note=? WHERE id=?",
         [fields.entry_type, fields.started_at, fields.ended_at, fields.amount_ml, fields.feed_kind, fields.diaper_kind, fields.note, existingId],
       );
-    } catch { saveFailed(); return; }
+    } catch (e) { saveFailed(e, { action: "save the entry", thing: "entry" }); return; }
     const idx = entries.findIndex((e) => e.id === existingId);
     if (idx !== -1) entries[idx] = { ...entries[idx], ...fields };
     error = "";
@@ -291,7 +293,7 @@ async function saveEntry(fields, existingId) {
         "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         [row.id, row.baby_id, row.entry_type, row.started_at, row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_at],
       );
-    } catch { saveFailed(); return; }
+    } catch (e) { saveFailed(e, { action: "save the entry", thing: "entry" }); return; }
     entries = [row, ...entries];
     error = "";
     closeModal();
@@ -314,7 +316,7 @@ async function deleteEntry(id) {
   closeModal();
   render();
   try { await db("DELETE FROM app_baby_log__entries WHERE id = ?", [id]); }
-  catch (e) { console.error(e); entries = prev; showError("Couldn’t delete the entry — try again."); }
+  catch (e) { console.error(e); entries = prev; showError(failureLine(e, { action: "delete the entry", thing: "entry" })); }
 }
 
 /** Toggle the sleep timer: start a running entry, or stamp ended_at on it. */
@@ -327,7 +329,7 @@ async function toggleSleep() {
     entries[idx] = { ...running, ended_at: endedAt };
     render();
     try { await db("UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ?", [endedAt, running.id]); }
-    catch (e) { console.error(e); entries[idx] = prev; showError("Couldn’t stop the sleep timer — try again."); }
+    catch (e) { console.error(e); entries[idx] = prev; showError(failureLine(e, { action: "stop the sleep timer", thing: "entry" })); }
   } else {
     await saveEntry({ entry_type: "sleep", started_at: nowIso(), ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "", note: "" }, null);
   }
@@ -480,7 +482,7 @@ function openBabyEditor() {
     line.hidden = true;
     const btn = modalEl?.querySelector('button[type="submit"]');
     if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Adding…"; }
-    addBaby({ name, birth_date: dob }).catch(() => saveFailed());
+    addBaby({ name, birth_date: dob }).catch((err) => saveFailed(err, { action: "add the child", thing: "child" }));
   });
 }
 
@@ -556,7 +558,7 @@ function openEntryEditor(existing, presetType) {
       feed_kind: entryType === "feed" ? document.getElementById("f-feedkind").value : "",
       diaper_kind: entryType === "diaper" ? document.getElementById("f-diaperkind").value : "",
       note: document.getElementById("f-note").value.trim(),
-    }, e?.id ?? null).catch(() => saveFailed());
+    }, e?.id ?? null).catch((err) => saveFailed(err, { action: "save the entry", thing: "entry" }));
   });
 }
 

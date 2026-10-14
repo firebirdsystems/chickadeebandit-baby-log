@@ -156,3 +156,27 @@ export function diaperKindLabel(kind) {
 export function searchableFields(item) {
   return [item.note, item.entry_type, item.feed_kind, item.diaper_kind];
 }
+
+/**
+ * The line a failed write shows (app-template CLAUDE.md, "Refused, gone, or
+ * failed"): "try again" only when retrying can work. Decided from the
+ * status and code the request helper copies onto the Error, never from the
+ * hub's text. `gone` is the caller's re-read for a write that changed
+ * nothing or met a 409: true = the row is gone, false = a GUARDED write's
+ * row is there in another state. An unguarded `WHERE id = ?` write whose row
+ * is still there was refused (pass `{ status: 403 }`), and a failed re-read
+ * passes no `gone` (the plain retry line).
+ */
+export function failureLine(e, { action, thing, gone } = {}) {
+  if (gone === true) return `This ${thing} has been removed.`;
+  if (gone === false) return `This ${thing} was changed by someone else — check it first.`;
+  const status = e?.status;
+  if (e?.code === "UNIQUE_CONSTRAINT" || /UNIQUE constraint failed/i.test(String(e?.message ?? ""))) {
+    return `That ${thing} already exists.`;
+  }
+  if (status === 403) return `You don’t have permission to ${action}.`;
+  if (status === 507) return "The household’s storage is full — free up space first.";
+  if (status === 404) return `This ${thing} has been removed.`;
+  if (status === 409) return `This ${thing} was changed by someone else — check it first.`;
+  return `Couldn’t ${action} — try again.`;
+}
