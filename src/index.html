@@ -278,7 +278,9 @@ async function addBaby(fields, form) {
       [row.id, row.name, row.birth_date, row.emoji, row.created_by, row.created_at]);
   } catch (e) {
     const stored = await landedUnheard(e, "app_baby_log__babies", "id, name, birth_date, emoji, archived, created_by, created_at", id);
-    if (!stored) { saveFailed(e, { action: "add the child", thing: "child" }); return; }
+    // The id is ours: with the read-back failed (undefined), a UNIQUE answer may be
+    // this form's own first try, so nothing is known — "try again", not "already exists".
+    if (!stored) { const words = { action: "add the child", thing: "child" }; saveFailed(e, words, failureLine(stored === undefined ? null : e, words)); return; }
     console.error(e);
     if (storedDiffers(stored, fields)) note = SAVED_AS_FIRST;
     row = stored;
@@ -357,7 +359,9 @@ async function saveEntry(fields, existingId, pinHost = null) {
         if (pinHost && !outcomeUnknown(e)) delete pinHost.rowId;
         // The read-back found no row: nothing stored the first try's values.
         else if (pinHost && stored === null) pinHost.unstored = true;
-        saveFailed(e, { action: "save the entry", thing: "entry" });
+        // A failed read-back (undefined) leaves the outcome unknown: "try again".
+        const words = { action: "save the entry", thing: "entry" };
+        saveFailed(e, words, failureLine(stored === undefined ? null : e, words));
         return;
       }
       console.error(e);
