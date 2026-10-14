@@ -28,11 +28,13 @@
       "kind": "adult_writable"
     },
     "entries": {
-      "kind": "adult_writable",
-      "retain_days": {
-        "default": 730,
-        "timestamp_column": "started_at"
-      }
+      "kind": "adult_writable"
+    }
+  },
+  "retention": {
+    "entries": {
+      "default": 730,
+      "timestamp_column": "started_at"
     }
   },
   "member_references": {
@@ -56,9 +58,6 @@
       "query": "SELECT b.name AS title, e.entry_type AS subtitle, e.started_at AS at FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 ORDER BY e.started_at DESC LIMIT 3"
     },
     "display": { "template": "list", "title": "title", "subtitle": "subtitle", "when": "at" }
-  },
-  "resource_limits": {
-    "max_db_bytes": 52428800
   },
   "ai_access": {
     "allowed": true,

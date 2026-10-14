@@ -9,7 +9,7 @@ caregiver can see.
 - **Storage:** D1 (`app_baby_log__babies`, `app_baby_log__entries`)
 - **Access:** both tables `adult_writable` — everyone in the household can read
   the log, only adults (caregivers) can write.
-- **Retention:** entries auto-expire after 730 days (`retain_days`), keeping the
+- **Retention:** entries auto-expire after 730 days (`retention`), keeping the
   high-volume log bounded.
 - **AI:** read-only exports `recent_entries` and `babies`.
 
