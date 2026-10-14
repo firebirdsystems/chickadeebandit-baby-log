@@ -119,6 +119,7 @@ import { esc, isAdult, hubConfirm, searchMatch, glyph } from "/hub-sdk.js";
 import {
   ENTRY_TYPES, typeMeta, fmtDuration, timeAgo, dayKey, groupByDay,
   summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel, searchableFields, failureLine,
+  unchangedWriteLine, outcomeUnknown, storedDiffers, SAVED_AS_FIRST,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -231,9 +232,8 @@ function showError(msg) { error = msg; render(); }
 // A save the hub refused: the form stays open as typed, says so in its own
 // error line, and its button works again. With no form open (the sleep
 // timer), the page's error line carries the message instead.
-function saveFailed(e, words) {
+function saveFailed(e, words, text = failureLine(e, words)) {
   if (e) console.error(e);
-  const text = failureLine(e, words);
   const line = modalEl?.querySelector("[data-form-error]");
   if (!line) { showError(text); return; }
   line.textContent = text;
@@ -242,18 +242,51 @@ function saveFailed(e, words) {
   if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label ?? btn.textContent; }
 }
 
+/** A plain `WHERE id = ?` write's `changed`; 0 means no row took it. No DB (demo): taken. */
+function changedNothing(res) { return !!DB && !Number(res?.changed); }
+
+/** Re-read after a write that changed nothing: true = no row, false = still there, undefined = the read failed. */
+async function rowGone(table, id) {
+  try { return !(await db(`SELECT id FROM ${table} WHERE id = ?`, [id])).rows?.length; }
+  catch (e) { console.error(e); return undefined; }
+}
+
+/**
+ * Retry after a lost response: a create whose answer leaves the outcome
+ * unknown is read back by its pinned id. Returns the stored row when an
+ * earlier try landed, else null (the save failed; the id stays pinned), or
+ * undefined when the read-back itself failed.
+ */
+async function landedUnheard(e, table, cols, id) {
+  if (!DB || !outcomeUnknown(e)) return null;
+  try { return (await db(`SELECT ${cols} FROM ${table} WHERE id = ?`, [id])).rows?.[0] ?? null; }
+  catch (readErr) { console.error(readErr); return undefined; }
+}
+
 /* ── Mutations ─────────────────────────────────────────────────────────────── */
-async function addBaby(fields) {
-  const row = { id: crypto.randomUUID(), name: fields.name, birth_date: fields.birth_date, emoji: "👶", archived: 0, created_by: me.id, created_at: nowIso() };
+async function addBaby(fields, form) {
+  // The id is the form's, minted on its first Add and sent on every retry: a
+  // try whose answer was lost may have stored the child, and a second press
+  // must find that row rather than add another.
+  const id = form ? (form.dataset.rowId ??= crypto.randomUUID()) : crypto.randomUUID();
+  let row = { id, name: fields.name, birth_date: fields.birth_date, emoji: "👶", archived: 0, created_by: me.id, created_at: nowIso() };
+  let note = "";
   // The form stays open until the hub has the child: nothing is drawn for a
   // row the hub never got.
   try {
     await db("INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES (?,?,?,?,0,?,?)",
       [row.id, row.name, row.birth_date, row.emoji, row.created_by, row.created_at]);
-  } catch (e) { saveFailed(e, { action: "add the child", thing: "child" }); return; }
-  babies = [...babies, row];
+  } catch (e) {
+    const stored = await landedUnheard(e, "app_baby_log__babies", "id, name, birth_date, emoji, archived, created_by, created_at", id);
+    if (!stored) { saveFailed(e, { action: "add the child", thing: "child" }); return; }
+    console.error(e);
+    if (storedDiffers(stored, fields)) note = SAVED_AS_FIRST;
+    row = stored;
+  }
+  if (form) delete form.dataset.rowId;
+  babies = [...babies.filter((b) => b.id !== row.id), row];
   currentBabyId = row.id;
-  error = "";
+  error = note;
   closeModal();
   render();
 }
@@ -266,36 +299,75 @@ async function archiveBaby(id) {
   if (currentBabyId === id) currentBabyId = babies[0]?.id ?? null;
   closeModal();
   render();
+  const words = { action: "archive the child", thing: "child" };
+  let res;
   try {
-    await db("UPDATE app_baby_log__babies SET archived = 1 WHERE id = ?", [id]);
-  } catch (e) { console.error(e); babies = prev; showError(failureLine(e, { action: "archive the child", thing: "child" })); }
+    res = await db("UPDATE app_baby_log__babies SET archived = 1 WHERE id = ?", [id]);
+  } catch (e) { console.error(e); babies = prev; showError(failureLine(e, words)); return; }
+  // Nothing archived: the re-read says why. Gone: it stays off the list.
+  // Still there: the row policy refused it, and it comes back.
+  if (changedNothing(res)) {
+    const gone = await rowGone("app_baby_log__babies", id);
+    if (gone !== true) babies = prev;
+    showError(unchangedWriteLine(gone, words));
+  }
 }
 
-async function saveEntry(fields, existingId) {
+async function saveEntry(fields, existingId, pinHost = null) {
   const now = nowIso();
   if (existingId) {
+    const words = { action: "save the entry", thing: "entry" };
     // The form stays open until the hub has the edit (see saveFailed).
+    let res;
     try {
-      await db(
+      res = await db(
         "UPDATE app_baby_log__entries SET entry_type=?, started_at=?, ended_at=?, amount_ml=?, feed_kind=?, diaper_kind=?, note=? WHERE id=?",
         [fields.entry_type, fields.started_at, fields.ended_at, fields.amount_ml, fields.feed_kind, fields.diaper_kind, fields.note, existingId],
       );
-    } catch (e) { saveFailed(e, { action: "save the entry", thing: "entry" }); return; }
+    } catch (e) { saveFailed(e, words); return; }
+    // No row took the edit: the form stays as typed and says why. A row that
+    // is gone leaves the list behind it too.
+    if (changedNothing(res)) {
+      const gone = await rowGone("app_baby_log__entries", existingId);
+      if (gone === true) { entries = entries.filter((x) => x.id !== existingId); render(); }
+      saveFailed(null, words, unchangedWriteLine(gone, words));
+      return;
+    }
     const idx = entries.findIndex((e) => e.id === existingId);
     if (idx !== -1) entries[idx] = { ...entries[idx], ...fields };
     error = "";
     closeModal();
     render();
   } else {
-    const row = { id: crypto.randomUUID(), baby_id: currentBabyId, ...fields, created_by: me.id, created_at: now };
+    // The id is pinned on the form (or the sleep timer) on its first try and
+    // sent on every retry: a try whose answer was lost may have stored the
+    // entry, and a second press must find it rather than log it twice.
+    const id = pinHost ? (pinHost.rowId ??= crypto.randomUUID()) : crypto.randomUUID();
+    let row = { id, baby_id: currentBabyId, ...fields, created_by: me.id, created_at: now };
+    let note = "";
     try {
       await db(
         "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         [row.id, row.baby_id, row.entry_type, row.started_at, row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_at],
       );
-    } catch (e) { saveFailed(e, { action: "save the entry", thing: "entry" }); return; }
-    entries = [row, ...entries];
-    error = "";
+    } catch (e) {
+      const stored = await landedUnheard(e, "app_baby_log__entries", "id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at", id);
+      if (!stored) {
+        // A refusal the hub named stored nothing: the next try may mint afresh.
+        if (pinHost && !outcomeUnknown(e)) delete pinHost.rowId;
+        // The read-back found no row: nothing stored the first try's values.
+        else if (pinHost && stored === null) pinHost.unstored = true;
+        saveFailed(e, { action: "save the entry", thing: "entry" });
+        return;
+      }
+      console.error(e);
+      // Edited since that first try: what was stored is kept, and said so.
+      if (storedDiffers(stored, fields)) note = SAVED_AS_FIRST;
+      row = stored;
+    }
+    if (pinHost) delete pinHost.rowId;
+    entries = [row, ...entries.filter((x) => x.id !== row.id)];
+    error = note;
     closeModal();
     render();
     // Only once the entry exists; a failed publish is not a failed save.
@@ -315,23 +387,56 @@ async function deleteEntry(id) {
   entries = entries.filter((e) => e.id !== id);
   closeModal();
   render();
-  try { await db("DELETE FROM app_baby_log__entries WHERE id = ?", [id]); }
-  catch (e) { console.error(e); entries = prev; showError(failureLine(e, { action: "delete the entry", thing: "entry" })); }
+  const words = { action: "delete the entry", thing: "entry" };
+  let res;
+  try { res = await db("DELETE FROM app_baby_log__entries WHERE id = ?", [id]); }
+  catch (e) { console.error(e); entries = prev; showError(failureLine(e, words)); return; }
+  // Nothing deleted: the re-read says why. Gone already: it stays off the
+  // list. Still there: the row policy refused it, and it comes back.
+  if (changedNothing(res)) {
+    const gone = await rowGone("app_baby_log__entries", id);
+    if (gone !== true) entries = prev;
+    showError(unchangedWriteLine(gone, words));
+  }
 }
+
+// The sleep timer's pending start per baby: its id and start time are kept
+// until the outcome is known, so a second tap after a lost answer finds the first.
+const sleepPins = new Map();
 
 /** Toggle the sleep timer: start a running entry, or stamp ended_at on it. */
 async function toggleSleep() {
+  const babyId = currentBabyId;
+  let pin = sleepPins.get(babyId);
+  // A pinned start a later load found stored is settled.
+  if (pin && entries.some((e) => e.id === pin.rowId)) { sleepPins.delete(babyId); pin = null; }
   const running = runningSleep(entries, currentBabyId);
   if (running) {
+    const words = { action: "stop the sleep timer", thing: "entry" };
     const endedAt = nowIso();
-    const idx = entries.findIndex((e) => e.id === running.id);
-    const prev = entries[idx];
-    entries[idx] = { ...running, ended_at: endedAt };
+    const prev = entries;
+    entries = entries.map((e) => (e.id === running.id ? { ...running, ended_at: endedAt } : e));
     render();
-    try { await db("UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ?", [endedAt, running.id]); }
-    catch (e) { console.error(e); entries[idx] = prev; showError(failureLine(e, { action: "stop the sleep timer", thing: "entry" })); }
+    let res;
+    try { res = await db("UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ?", [endedAt, running.id]); }
+    catch (e) { console.error(e); entries = prev; showError(failureLine(e, words)); return; }
+    if (changedNothing(res)) {
+      const gone = await rowGone("app_baby_log__entries", running.id);
+      entries = gone === true ? prev.filter((e) => e.id !== running.id) : prev;
+      showError(unchangedWriteLine(gone, words));
+    }
   } else {
-    await saveEntry({ entry_type: "sleep", started_at: nowIso(), ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "", note: "" }, null);
+    if (!pin) sleepPins.set(babyId, (pin = { started_at: nowIso() }));
+    // A start already on its way: a second tap is ignored.
+    else if (pin.inFlight) return;
+    // A read-back found the last try unstored: same id, the start is now.
+    else if (pin.unstored) { pin.started_at = nowIso(); delete pin.unstored; }
+    pin.inFlight = true;
+    try {
+      await saveEntry({ entry_type: "sleep", started_at: pin.started_at, ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "", note: "" }, null, pin);
+    } finally { pin.inFlight = false; }
+    // Settled (saved, or refused outright): the next start is a new one.
+    if (!pin.rowId && sleepPins.get(babyId) === pin) sleepPins.delete(babyId);
   }
 }
 
@@ -482,7 +587,7 @@ function openBabyEditor() {
     line.hidden = true;
     const btn = modalEl?.querySelector('button[type="submit"]');
     if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Adding…"; }
-    addBaby({ name, birth_date: dob }).catch((err) => saveFailed(err, { action: "add the child", thing: "child" }));
+    addBaby({ name, birth_date: dob }, e.currentTarget).catch((err) => saveFailed(err, { action: "add the child", thing: "child" }));
   });
 }
 
@@ -558,7 +663,7 @@ function openEntryEditor(existing, presetType) {
       feed_kind: entryType === "feed" ? document.getElementById("f-feedkind").value : "",
       diaper_kind: entryType === "diaper" ? document.getElementById("f-diaperkind").value : "",
       note: document.getElementById("f-note").value.trim(),
-    }, e?.id ?? null).catch((err) => saveFailed(err, { action: "save the entry", thing: "entry" }));
+    }, e?.id ?? null, ev.currentTarget.dataset).catch((err) => saveFailed(err, { action: "save the entry", thing: "entry" }));
   });
 }
 
@@ -574,7 +679,7 @@ document.addEventListener("click", (e) => {
   if (t.hasAttribute("data-delete")) { deleteEntry(t.getAttribute("data-delete")); return; }
   if (t.hasAttribute("data-quick")) {
     const q = t.getAttribute("data-quick");
-    if (q === "sleep") { toggleSleep().catch((err) => { console.error(err); showError("Couldn’t save — try again."); }); return; }
+    if (q === "sleep") { toggleSleep().catch((err) => { console.error(err); showError(failureLine(err, { action: "save the sleep timer", thing: "entry" })); }); return; }
     if (q === "more") { openEntryEditor(null, "note"); return; }
     openEntryEditor(null, q);
   }

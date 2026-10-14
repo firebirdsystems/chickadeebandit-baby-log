@@ -180,3 +180,38 @@ export function failureLine(e, { action, thing, gone } = {}) {
   if (status === 409) return `This ${thing} was changed by someone else — check it first.`;
   return `Couldn’t ${action} — try again.`;
 }
+
+/**
+ * The line for a plain `WHERE id = ?` write that changed nothing, from the
+ * re-read by id that follows it: `gone` true = no row (removed), false = the
+ * row is still there, so the row policy narrowed the write away from this
+ * member (the permission line), undefined = the re-read failed (try again).
+ */
+export function unchangedWriteLine(gone, words) {
+  if (gone === undefined) return failureLine(null, words);
+  return gone ? failureLine(null, { ...words, gone: true }) : failureLine({ status: 403 }, words);
+}
+
+/**
+ * "Retry after a lost response" (app-template guide): whether a failed
+ * write's answer leaves its outcome unknown — no status, a 400, or a 5xx
+ * other than 507 — so the page reads the row back by its pinned id. A
+ * `UNIQUE_CONSTRAINT` answer is a 400 too: the usual retry of a create that
+ * landed collides on its own pinned id. Only finding the row under that id
+ * says it landed; not found keeps the "already exists" line.
+ */
+export function outcomeUnknown(e) {
+  if (e?.code === "UNIQUE_CONSTRAINT" || /UNIQUE constraint failed/i.test(String(e?.message ?? ""))) return true;
+  const status = Number(e?.status) || 0;
+  return status === 0 || status === 400 || (status >= 500 && status !== 507);
+}
+
+/**
+ * Whether a stored row differs from what the form holds now, over the form's
+ * own fields only, compared as text with a missing value as empty.
+ */
+export function storedDiffers(row, fields) {
+  return Object.keys(fields).some((k) => String(row?.[k] ?? "") !== String(fields[k] ?? ""));
+}
+
+export const SAVED_AS_FIRST = "Saved as first entered — check it and update what changed.";

@@ -25,8 +25,8 @@ describe("manifest.json", () => {
     expect(manifest.row_policies?.entries?.kind).toBe("adult_writable");
   });
 
-  it("the high-volume entries table auto-expires via retain_days on a plaintext column", () => {
-    const r = manifest.row_policies?.entries?.retain_days;
+  it("the high-volume entries table auto-expires via retention on a plaintext column", () => {
+    const r = manifest.retention?.entries;
     expect(r?.default).toBeGreaterThan(0);
     expect(r?.timestamp_column).toBe("started_at");
   });
