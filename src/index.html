@@ -17,7 +17,7 @@
       --accent-hover: var(--hub-primary-hover, #374151);
       --accent-fg: var(--hub-primary-fg, #ffffff);
       --radius: var(--hub-radius, 10px);
-      --green: #047857; --green-soft: #d1fae5;
+      --green: var(--hub-tint-success-fg, #047857); --green-soft: var(--hub-tint-success, #d1fae5);
       --amber: #b45309; --amber-soft: #fef3c7;
       --red: var(--hub-tint-danger-fg, #b91c1c); --red-soft: var(--hub-tint-danger, #fee2e2);
       --blue: var(--hub-tint-info-fg, #1d4ed8); --blue-soft: var(--hub-tint-info, #dbeafe);
@@ -100,6 +100,16 @@
     .load-error { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--hub-tint-danger, #fee2e2); color: var(--hub-tint-danger-fg, #b91c1c); font-size: 0.9rem; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
     .load-error-retry { background: none; border: 1px solid currentColor; border-radius: 8px; padding: 5px 10px; font: inherit; font-weight: 600; color: inherit; cursor: pointer; flex-shrink: 0; }
     .search-row { margin-bottom: 12px; }
+    .shiftbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; margin: 12px 0; flex-wrap: wrap; }
+    .shiftbar.on { background: var(--green-soft); border-color: var(--green); color: var(--green); }
+    .handoff-card { margin: 12px 0; display: grid; gap: 4px; }
+    .pre { white-space: pre-wrap; word-break: break-word; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 14px 2px 8px; }
+    .section-head h2 { margin: 0; }
+    .shift { display: grid; gap: 4px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+    .shift-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .hours { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .82rem; color: var(--muted); margin: 0 2px 8px; }
+    .hours b { color: var(--text); }
     .search-input {
       width: 100%; border: 1.5px solid var(--border-mid, var(--border, #d1d5db));
       border-radius: 8px; padding: 9px 11px; font: inherit;
@@ -115,11 +125,12 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, hubConfirm, searchMatch, glyph } from "/hub-sdk.js";
+import { esc, isAdult, hubConfirm, hubToday, searchMatch, glyph } from "/hub-sdk.js";
 import {
   ENTRY_TYPES, typeMeta, fmtDuration, timeAgo, dayKey, groupByDay,
   summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel, searchableFields, failureLine,
   unchangedWriteLine, outcomeUnknown, storedDiffers, SAVED_AS_FIRST,
+  sortShifts, runningShift, canEditShift, shiftLength, shiftTimesError, latestHandoff, hoursByMember,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -147,6 +158,8 @@ let memberMap = new Map();
 let me = null;
 let babies = [];
 let entries = [];
+let shifts = [];
+let view = "log";       // "log" | "shifts"
 let currentBabyId = null;
 let searchQ = "";       // in-app search (see logic.js searchableFields)
 let error = "";
@@ -155,8 +168,31 @@ let modalEl = null;
 let tickTimer = null;
 
 function nowIso() { return new Date().toISOString(); }
+// Adults manage the children and remove entries. Everyone with the app logs:
+// the hub stamps each entry and shift with whoever wrote it, a nanny or
+// sitter signed in as a guest included (manifest row_policies).
 function canManage() { return !!me && isAdult(me); }
+function canLog() { return !!me; }
 function memberName(id) { return memberMap.get(id)?.name ?? "Someone"; }
+/** The name on a row, else the member's current name: a guest's seat is removed when the job ends. */
+function rowName(name, id) { return name || memberName(id); }
+function fmtClock(iso) {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return String(iso ?? "");
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(when);
+}
+function fmtWhen(iso) {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return String(iso ?? "");
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(when);
+}
+// "Oct 12, 9:02 AM to 1:15 PM · 4 h 13 min"; the end carries its date when the shift ran past midnight.
+function shiftSpan(shift) {
+  if (!shift.ended_at) return `Started ${fmtWhen(shift.started_at)}`;
+  const sameDay = new Date(shift.started_at).toDateString() === new Date(shift.ended_at).toDateString();
+  const length = shiftLength(shift.started_at, shift.ended_at);
+  return `${fmtWhen(shift.started_at)} to ${sameDay ? fmtClock(shift.ended_at) : fmtWhen(shift.ended_at)}${length ? ` · ${length}` : ""}`;
+}
 
 /* ── DB helper ─────────────────────────────────────────────────────────────── */
 async function db(sql, params = []) {
@@ -177,6 +213,7 @@ async function loadMembers() {
     members = [
       { id: "demo-1", name: "Alex", role: "adult" },
       { id: "demo-2", name: "Jordan", role: "adult" },
+      { id: "demo-3", name: "Pat", role: "guest" },
     ];
   } else {
     // A failed read is a failed load, never an empty household.
@@ -204,23 +241,38 @@ async function loadEntries() {
   if (!DB) {
     const now = Date.now();
     entries = [
-      { id: "e1", baby_id: "demo-baby", entry_type: "feed", started_at: new Date(now - 90 * 60000).toISOString(), ended_at: null, amount_ml: 120, feed_kind: "bottle", diaper_kind: "", note: "", created_by: "demo-1", created_at: nowIso() },
-      { id: "e2", baby_id: "demo-baby", entry_type: "diaper", started_at: new Date(now - 3 * 3600000).toISOString(), ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "wet", note: "", created_by: "demo-2", created_at: nowIso() },
-      { id: "e3", baby_id: "demo-baby", entry_type: "sleep", started_at: new Date(now - 5 * 3600000).toISOString(), ended_at: new Date(now - 3.5 * 3600000).toISOString(), amount_ml: null, feed_kind: "", diaper_kind: "", note: "", created_by: "demo-1", created_at: nowIso() },
+      { id: "e1", baby_id: "demo-baby", entry_type: "feed", started_at: new Date(now - 90 * 60000).toISOString(), ended_at: null, amount_ml: 120, feed_kind: "bottle", diaper_kind: "", note: "", created_by: "demo-3", created_by_name: "Pat", created_at: nowIso() },
+      { id: "e2", baby_id: "demo-baby", entry_type: "diaper", started_at: new Date(now - 3 * 3600000).toISOString(), ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "wet", note: "", created_by: "demo-2", created_by_name: "Jordan", created_at: nowIso() },
+      { id: "e3", baby_id: "demo-baby", entry_type: "sleep", started_at: new Date(now - 5 * 3600000).toISOString(), ended_at: new Date(now - 3.5 * 3600000).toISOString(), amount_ml: null, feed_kind: "", diaper_kind: "", note: "", created_by: "demo-1", created_by_name: "Alex", created_at: nowIso() },
     ];
     return;
   }
   // Bounded: the timeline shows the recent log; retain_days prunes the rest.
   const res = await db(
-    "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400",
+    "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400",
   );
   entries = res.rows ?? [];
+}
+
+// Recent shifts and every one still running, however long ago it started, so
+// one nobody ended is never lost. The date param is the household-local day.
+const SHIFTS_SQL = "SELECT id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at FROM app_baby_log__shifts WHERE ended_at = '' OR started_at >= date(?, '-30 days') ORDER BY started_at DESC, id DESC";
+async function loadShifts() {
+  if (!DB) {
+    const now = Date.now();
+    shifts = [
+      { id: "s1", member_id: "demo-3", member_name: "Pat", started_at: new Date(now - 26 * 3600000).toISOString(), ended_at: new Date(now - 17 * 3600000).toISOString(), shift_date: hubToday(), summary: "Two bottles, a long morning nap, park after lunch.", handoff: "Last bottle at 4:40. Teething gel on the counter.", created_at: nowIso(), updated_at: nowIso() },
+    ];
+    return;
+  }
+  const res = await db(SHIFTS_SQL, [hubToday()]);
+  shifts = sortShifts(res.rows ?? []);
 }
 
 async function refresh() {
   error = "";
   try {
-    await Promise.all([loadMembers(), loadBabies(), loadEntries()]);
+    await Promise.all([loadMembers(), loadBabies(), loadEntries(), loadShifts()]);
     if (!currentBabyId || !babies.some((b) => b.id === currentBabyId)) currentBabyId = babies[0]?.id ?? null;
     loadFailed = false;
     render();
@@ -345,15 +397,15 @@ async function saveEntry(fields, existingId, pinHost = null) {
     // sent on every retry: a try whose answer was lost may have stored the
     // entry, and a second press must find it rather than log it twice.
     const id = pinHost ? (pinHost.rowId ??= crypto.randomUUID()) : crypto.randomUUID();
-    let row = { id, baby_id: currentBabyId, ...fields, created_by: me.id, created_at: now };
+    let row = { id, baby_id: currentBabyId, ...fields, created_by: me.id, created_by_name: me.name ?? "", created_at: now };
     let note = "";
     try {
       await db(
-        "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        [row.id, row.baby_id, row.entry_type, row.started_at, row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_at],
+        "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [row.id, row.baby_id, row.entry_type, row.started_at, row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_by_name, row.created_at],
       );
     } catch (e) {
-      const stored = await landedUnheard(e, "app_baby_log__entries", "id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at", id);
+      const stored = await landedUnheard(e, "app_baby_log__entries", "id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at", id);
       if (!stored) {
         // A refusal the hub named stored nothing: the next try may mint afresh.
         if (pinHost && !outcomeUnknown(e)) delete pinHost.rowId;
@@ -444,7 +496,246 @@ async function toggleSleep() {
   }
 }
 
+/* ── Shifts ────────────────────────────────────────────────────────────────── */
+// A nanny or sitter's day: started, ended, what was done, and a handoff note
+// the next person reads first. Anyone with the app may log one; the hub
+// stamps it with them. The writer or any adult may correct it; only an adult
+// may remove it.
+const SHIFT_COLS = "id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at";
+
+// Set while a start is on its way: the new shift only joins the list once the
+// hub has answered, so without this a second tap in that gap starts another.
+let startingShift = false;
+// The pending start: its row is minted on the first tap and sent on every
+// retry until the outcome is known. A try whose answer was lost may have
+// stored the shift, and the next tap must find that row rather than open a
+// second shift that nobody would ever end.
+let shiftPin = null;
+async function startShift() {
+  if (startingShift || !canLog() || runningShift(shifts, me.id)) return;
+  // A pinned start a later load found stored is settled.
+  if (shiftPin && shifts.some((x) => x.id === shiftPin.id)) shiftPin = null;
+  startingShift = true;
+  if (!shiftPin || shiftPin.unstored) {
+    // A read-back found the last try unstored: same id, but the start is now.
+    const now = nowIso();
+    shiftPin = { id: shiftPin?.id ?? crypto.randomUUID(), member_id: me.id, member_name: me.name ?? "", started_at: now, ended_at: "", shift_date: hubToday(new Date(now)), summary: "", handoff: "", created_at: now, updated_at: now };
+  }
+  let row = shiftPin;
+  try {
+    if (DB) await db(`INSERT INTO app_baby_log__shifts (${SHIFT_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [row.id, row.member_id, row.member_name, row.started_at, row.ended_at, row.shift_date, row.summary, row.handoff, row.created_at, row.updated_at]);
+  } catch (e) {
+    const stored = await landedUnheard(e, "app_baby_log__shifts", SHIFT_COLS, row.id);
+    // Not ours, and UNIQUE: this person already has a shift running, started
+    // from another tab or device (the one-running index, migration 003). The
+    // list is read again so it shows that shift; nothing new was stored.
+    if (stored === null && (e?.code === "UNIQUE_CONSTRAINT" || /UNIQUE constraint failed/i.test(String(e?.message ?? "")))) {
+      console.error(e);
+      shiftPin = null;
+      startingShift = false;
+      try { await loadShifts(); error = runningShift(shifts, me.id) ? "" : "Couldn’t start the shift — try again."; }
+      catch (readErr) { console.error(readErr); error = "Couldn’t start the shift — try again."; }
+      render();
+      return;
+    }
+    if (!stored) {
+      // A refusal the hub named stored nothing: the next tap may mint afresh.
+      // Otherwise the pin stays, and the next tap sends the same row.
+      if (!outcomeUnknown(e)) shiftPin = null;
+      else if (stored === null) shiftPin.unstored = true;
+      const words = { action: "start the shift", thing: "shift" };
+      console.error(e);
+      showError(failureLine(stored === undefined ? null : e, words));
+      startingShift = false;
+      return;
+    }
+    console.error(e);
+    row = stored;
+  }
+  shiftPin = null;
+  shifts = sortShifts([row, ...shifts.filter((x) => x.id !== row.id)]);
+  error = "";
+  startingShift = false;
+  render();
+}
+
+/** Reads one shift again and puts it in the list in place of the copy held; drops it when it is gone. */
+async function refreshShift(id) {
+  const row = (await db(`SELECT ${SHIFT_COLS} FROM app_baby_log__shifts WHERE id = ?`, [id])).rows?.[0] ?? null;
+  shifts = row ? sortShifts(shifts.map((x) => (x.id === id ? row : x))) : shifts.filter((x) => x.id !== id);
+  return row;
+}
+
+/**
+ * Writes the form's fields to a shift. Guarded on `updated_at`: two people
+ * may write the same shift (the nanny ending it, a parent correcting it),
+ * and neither page refreshes, so a write that finds the row moved on changes
+ * nothing, the row is read again, and the form says so.
+ *
+ * The new stamp is pinned on the form (`pinHost.stamp`) on its first try and
+ * sent on every retry. A try whose answer was lost may have landed; the retry
+ * then changes nothing, and the re-read finding this form's own stamp is
+ * what says the save went through rather than "changed by someone else".
+ */
+async function saveShift(id, fields, pinHost, rewrite = false) {
+  const words = { action: "save the shift", thing: "shift" };
+  const shift = shifts.find((x) => x.id === id);
+  if (!shift || !canEditShift(me, shift, isAdult(me))) return;
+  const stamp = (pinHost.stamp ??= nowIso());
+  const set = { ...fields, updated_at: stamp };
+  const cols = Object.keys(set);
+  let res;
+  try {
+    res = await db(`UPDATE app_baby_log__shifts SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ? AND updated_at = ?`, [...cols.map((c) => set[c]), id, shift.updated_at]);
+  } catch (e) { saveFailed(e, words); return; }
+  if (changedNothing(res)) {
+    let fresh;
+    try { fresh = await refreshShift(id); } catch (e) { console.error(e); saveFailed(null, words); return; }
+    // Our own earlier try landed: refreshShift has put the stored row in the list.
+    if (fresh && fresh.updated_at === stamp) {
+      delete pinHost.stamp;
+      // The form was changed after that try: write what it holds now, once,
+      // guarded on the stamp that landed. Otherwise the save is done.
+      if (!rewrite && storedDiffers(fresh, fields)) return saveShift(id, fields, pinHost, true);
+      error = ""; closeModal(); render(); return;
+    }
+    // Gone, or moved on under us: the list now shows it as the hub holds it.
+    if (fresh) render();
+    saveFailed(null, words, unchangedWriteLine(fresh ? false : true, words));
+    return;
+  }
+  delete pinHost.stamp;
+  shifts = sortShifts(shifts.map((x) => (x.id === id ? { ...x, ...set } : x)));
+  error = "";
+  closeModal();
+  render();
+}
+
+async function deleteShift(id) {
+  const ok = await hubConfirm({ message: "Remove this shift?", confirmLabel: "Remove", destructive: true });
+  if (!ok) return;
+  const prev = shifts;
+  shifts = shifts.filter((s) => s.id !== id);
+  closeModal();
+  render();
+  const words = { action: "remove the shift", thing: "shift" };
+  let res;
+  try { res = await db("DELETE FROM app_baby_log__shifts WHERE id = ?", [id]); }
+  catch (e) { console.error(e); shifts = prev; showError(failureLine(e, words)); return; }
+  if (changedNothing(res)) {
+    const gone = await rowGone("app_baby_log__shifts", id);
+    if (gone !== true) shifts = prev;
+    showError(unchangedWriteLine(gone, words));
+  }
+}
+
+// Ends the viewer's running shift (`end`), or corrects any shift they may edit.
+function openShiftEditor(id, end = false) {
+  const shift = shifts.find((x) => x.id === id);
+  if (!shift || !canEditShift(me, shift, isAdult(me))) return;
+  const whose = shift.member_id !== me?.id ? ` for ${esc(rowName(shift.member_name, shift.member_id))}` : "";
+  const endValue = end ? localDatetimeValue(nowIso()) : shift.ended_at ? localDatetimeValue(shift.ended_at) : "";
+  openModal(`
+    <h2>${end ? "End shift" : `Edit the shift${whose}`}</h2>
+    <form class="form" id="shift-form">
+      <div class="grid2">
+        <div class="field"><label for="sh-start">Started</label><input id="sh-start" type="datetime-local" value="${esc(localDatetimeValue(shift.started_at))}" required /></div>
+        <div class="field"><label for="sh-end">Ended</label><input id="sh-end" type="datetime-local" value="${esc(endValue)}" ${end ? "required" : ""} /></div>
+      </div>
+      ${end ? "" : `<p class="muted tiny">Leave Ended empty while the shift is still running.</p>`}
+      <div class="field"><label for="sh-summary">What was done</label><textarea id="sh-summary" ${end ? "data-autofocus" : ""} placeholder="Bottles, naps, where you went, anything out of the ordinary">${esc(shift.summary ?? "")}</textarea></div>
+      <div class="field"><label for="sh-handoff">Handoff note</label><textarea id="sh-handoff" placeholder="What the next person should know">${esc(shift.handoff ?? "")}</textarea></div>
+      <div class="error" data-form-error data-testid="modal-error" role="alert" hidden></div>
+      <div class="modal-actions">
+        ${canManage() ? `<button type="button" class="btn btn-danger modal-left" data-delete-shift="${esc(shift.id)}">Remove</button>` : ""}
+        <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
+        <button type="submit" class="btn">${end ? "End shift" : "Save"}</button>
+      </div>
+    </form>`);
+  modalEl.querySelector("[data-autofocus]")?.focus();
+  modalEl.querySelector("#shift-form").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const line = ev.currentTarget.querySelector("[data-form-error]");
+    const toIso = (raw) => { const d = new Date(raw); return Number.isNaN(d.getTime()) ? null : d.toISOString(); };
+    const startRaw = document.getElementById("sh-start").value;
+    const endRaw = document.getElementById("sh-end").value;
+    const startedAt = startRaw ? toIso(startRaw) : "";
+    const endedAt = endRaw ? toIso(endRaw) : (end ? null : "");
+    const problem = shiftTimesError(startedAt ?? "", endedAt);
+    if (problem) { line.textContent = problem; line.hidden = false; return; }
+    line.hidden = true;
+    const btn = modalEl?.querySelector('button[type="submit"]');
+    if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Saving…"; }
+    saveShift(shift.id, {
+      started_at: startedAt,
+      ended_at: endedAt,
+      // The household's calendar day the shift STARTED on, so a corrected start moves it.
+      shift_date: hubToday(startedAt),
+      summary: document.getElementById("sh-summary").value.trim(),
+      handoff: document.getElementById("sh-handoff").value.trim(),
+    }, ev.currentTarget.dataset).catch((err) => saveFailed(err, { action: "save the shift", thing: "shift" }));
+  });
+}
+
+// On the log: the viewer's running shift, or the button to start one.
+function shiftBarHtml() {
+  if (!canLog()) return "";
+  const mine = runningShift(shifts, me.id);
+  if (mine) {
+    return `<div class="card shiftbar on" data-testid="shift-bar"><span>On shift since ${esc(fmtClock(mine.started_at))}</span><button class="btn btn-sm" data-end-shift="${esc(mine.id)}">End shift</button></div>`;
+  }
+  return `<div class="card shiftbar" data-testid="shift-bar"><span class="muted tiny">Nanny or sitter? Start a shift when you arrive and leave a handoff note when you go.</span><button class="btn btn-ghost btn-sm" data-start-shift>Start shift</button></div>`;
+}
+
+// The note the next person reads first, on the log and on the shifts tab.
+function handoffHtml() {
+  const handoff = latestHandoff(shifts);
+  if (!handoff) return "";
+  return `
+    <div class="card handoff-card" data-testid="latest-handoff">
+      <div class="muted tiny">Latest handoff · ${esc(rowName(handoff.member_name, handoff.member_id))}, ${esc(fmtWhen(handoff.ended_at))}</div>
+      <div class="pre">${esc(handoff.handoff)}</div>
+    </div>`;
+}
+
+function shiftCardHtml(s) {
+  const editable = canEditShift(me, s, isAdult(me));
+  return `
+    <div class="shift" data-testid="shift">
+      <div class="shift-top">
+        <div class="entry-title">${esc(rowName(s.member_name, s.member_id))}${s.ended_at ? "" : ` <span class="muted">· on shift</span>`}</div>
+        ${editable ? `<button class="edit-link" data-edit-shift="${esc(s.id)}">Edit</button>` : ""}
+      </div>
+      <div class="entry-meta">${esc(shiftSpan(s))}</div>
+      ${s.summary ? `<div class="pre">${esc(s.summary)}</div>` : ""}
+      ${s.handoff ? `<div class="pre muted"><strong>Handoff:</strong> ${esc(s.handoff)}</div>` : ""}
+    </div>`;
+}
+
+function renderShifts() {
+  const week = hoursByMember(shifts, 7);
+  return `
+    ${shiftBarHtml()}
+    ${handoffHtml()}
+    <div class="section-head"><h2>Shift log</h2><span class="muted tiny">Last 30 days</span></div>
+    ${week.length ? `<div class="hours">${week.map((w) => `<span>${esc(rowName(w.member_name, w.member_id))}: <b>${esc(fmtDuration(w.minutes * 60000))}</b> this week</span>`).join("")}</div>` : ""}
+    ${shifts.length
+      ? `<div class="stack">${shifts.map(shiftCardHtml).join("")}</div>`
+      : `<div class="card empty">No shifts logged yet.${canLog() ? " Start one when you arrive, and leave a handoff note when you go." : ""}</div>`}
+  `;
+}
+
 /* ── Rendering ─────────────────────────────────────────────────────────────── */
+function viewTabsHtml() {
+  return `
+      <div class="tabs" style="margin:0">
+        <button class="tab ${view === "log" ? "active" : ""}" data-view="log">Log</button>
+        <button class="tab ${view === "shifts" ? "active" : ""}" data-view="shifts">Shifts</button>
+        ${canManage() ? `<button class="btn btn-ghost btn-sm" data-add-baby>+ Child</button>` : ""}
+      </div>`;
+}
+
 function dayLabel(key) {
   const today = dayKey(nowIso());
   const yesterday = dayKey(new Date(Date.now() - 86400000).toISOString());
@@ -465,10 +756,10 @@ function renderEntry(e) {
       <div class="entry-body">
         <div class="entry-title">${esc(meta.label)}${detail ? ` <span class="muted">· ${esc(detail)}</span>` : ""}</div>
         ${e.note ? `<div class="entry-meta">${esc(e.note)}</div>` : ""}
-        <div class="entry-meta">${esc(time)} · ${esc(memberName(e.created_by))}</div>
+        <div class="entry-meta">${esc(time)} · ${esc(rowName(e.created_by_name, e.created_by))}</div>
       </div>
       <div class="entry-side">
-        ${canManage() ? `<button class="edit-link" data-edit="${esc(e.id)}">Edit</button>` : ""}
+        ${canLog() ? `<button class="edit-link" data-edit="${esc(e.id)}">Edit</button>` : ""}
       </div>
     </div>`;
 }
@@ -494,14 +785,19 @@ function render() {
     return;
   }
 
+  // No child yet still shows the shifts: a nanny can be at work before a
+  // parent has added the baby, and a shift she started must stay endable.
   if (!babies.length) {
     root.innerHTML = `
-      <div class="topbar"><h1>Baby Log</h1></div>
+      <div class="topbar"><h1>Baby Log</h1>${viewTabsHtml()}</div>
       ${error ? `<div class="error">${esc(error)}</div>` : ""}
+      ${view === "shifts" ? renderShifts() : `
       <div class="card empty">
         No children yet.${canManage() ? "" : " Ask a parent to add one."}
         ${canManage() ? `<div style="margin-top:12px"><button class="btn" data-add-baby>+ Add your baby</button></div>` : ""}
-      </div>`;
+      </div>
+      ${shiftBarHtml()}
+      ${handoffHtml()}`}`;
     return;
   }
 
@@ -522,28 +818,32 @@ function render() {
         <h1>${esc(baby.emoji)} ${esc(baby.name)}</h1>
         <p class="muted tiny">${age ? `${esc(age)} old · ` : ""}shared caregiver log</p>
       </div>
-      ${canManage() ? `<button class="btn btn-ghost btn-sm" data-add-baby>+ Child</button>` : ""}
+      ${viewTabsHtml()}
     </div>
-    ${babies.length > 1 ? `<div class="tabs">${babies.map((b) => `<button class="tab ${b.id === baby.id ? "active" : ""}" data-baby="${esc(b.id)}">${esc(b.emoji)} ${esc(b.name)}</button>`).join("")}</div>` : ""}
     ${error ? `<div class="error">${esc(error)}</div>` : ""}
+    ${view === "shifts" ? renderShifts() : `
+    ${babies.length > 1 ? `<div class="tabs">${babies.map((b) => `<button class="tab ${b.id === baby.id ? "active" : ""}" data-baby="${esc(b.id)}">${esc(b.emoji)} ${esc(b.name)}</button>`).join("")}</div>` : ""}
     <div class="summary">
       <div class="stat"><span class="v">${today.feedCount}</span><span class="k">Feeds today</span></div>
       <div class="stat"><span class="v">${today.lastFeedAt ? esc(timeAgo(today.lastFeedAt)) : "—"}</span><span class="k">Last feed</span></div>
       <div class="stat"><span class="v">${today.sleepMs ? esc(fmtDuration(today.sleepMs)) : "—"}${today.sleeping ? ` ${glyph("moon")}` : ""}</span><span class="k">Sleep today</span></div>
     </div>
-    ${canManage() ? `
+    ${canLog() ? `
       <div class="quick">
         <button data-quick="feed"><span class="q-icon">${glyph("bottle")}</span>Feed</button>
         <button data-quick="diaper"><span class="q-icon">${glyph("diaper")}</span>Diaper</button>
         <button data-quick="sleep" class="${sleeping ? "sleeping" : ""}"><span class="q-icon">${glyph("moon")}</span>${sleeping ? "End sleep" : "Sleep"}</button>
         <button data-quick="more"><span class="q-icon">${glyph("plus")}</span>More</button>
-      </div>` : `<p class="muted tiny" style="margin:10px 2px">Only adults can log entries.</p>`}
+      </div>` : ""}
+    ${shiftBarHtml()}
+    ${handoffHtml()}
     ${babyEntries.length ? `<div class="search-row"><input id="search" class="search-input" type="search" placeholder="Search the log…" aria-label="Search the log" value="${esc(searchQ)}" /></div>` : ""}
     ${groups.length
       ? groups.map((g) => `
           <div class="day-head">${esc(dayLabel(g.key))}</div>
           <div class="stack">${g.entries.map(renderEntry).join("")}</div>`).join("")
-      : `<div class="card empty">${searchQ ? `Nothing matches "${esc(searchQ)}".` : `Nothing logged yet${canManage() ? " — tap a button above to start" : ""}.`}</div>`}
+      : `<div class="card empty">${searchQ ? `Nothing matches "${esc(searchQ)}".` : `Nothing logged yet${canLog() ? " — tap a button above to start" : ""}.`}</div>`}
+    `}
   `;
 
   // Keep the running-sleep total ticking without a full data reload.
@@ -623,7 +923,7 @@ function openEntryEditor(existing, presetType) {
       <div class="field"><label for="f-note">Note <span class="muted" style="text-transform:none">(optional)</span></label><textarea id="f-note">${esc(e?.note ?? "")}</textarea></div>
       <div class="error" data-form-error data-testid="modal-error" role="alert" hidden></div>
       <div class="modal-actions">
-        ${e ? `<button type="button" class="btn btn-danger modal-left" data-delete="${esc(e.id)}">Delete</button>` : ""}
+        ${e && canManage() ? `<button type="button" class="btn btn-danger modal-left" data-delete="${esc(e.id)}">Delete</button>` : ""}
         <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
         <button type="submit" class="btn">${e ? "Save" : "Log it"}</button>
       </div>
@@ -677,6 +977,11 @@ document.addEventListener("click", (e) => {
   if (!t) return;
   if (t.matches('[data-testid="load-retry"]')) { refresh(); return; }
   if (t.hasAttribute("data-baby")) { currentBabyId = t.getAttribute("data-baby"); render(); return; }
+  if (t.hasAttribute("data-view")) { view = t.getAttribute("data-view"); render(); return; }
+  if (t.hasAttribute("data-start-shift")) { startShift(); return; }
+  if (t.hasAttribute("data-end-shift")) { openShiftEditor(t.getAttribute("data-end-shift"), true); return; }
+  if (t.hasAttribute("data-edit-shift")) { openShiftEditor(t.getAttribute("data-edit-shift")); return; }
+  if (t.hasAttribute("data-delete-shift")) { deleteShift(t.getAttribute("data-delete-shift")); return; }
   if (t.hasAttribute("data-add-baby")) { openBabyEditor(); return; }
   if (t.hasAttribute("data-cancel")) { closeModal(); return; }
   if (t.hasAttribute("data-edit")) { openEntryEditor(entries.find((x) => x.id === t.getAttribute("data-edit"))); return; }

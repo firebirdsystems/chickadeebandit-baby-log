@@ -3,7 +3,8 @@
 -- `babies` holds one row per tracked child (usually one). `entries` is the
 -- high-volume log: feeds, diapers, sleep, pumping, and free-form notes.
 --
--- Access: both tables are `adult_writable` (manifest.json) — every household
+-- Access (as first shipped; see 003_caregivers.sql for what changed): both
+-- tables were `adult_writable` (manifest.json) — every household
 -- member may read (older siblings can check "did the baby eat?"), but only
 -- adults (the caregivers) may write. There is no per-row privacy: the whole
 -- point is a shared caregiver log.

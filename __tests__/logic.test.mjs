@@ -162,3 +162,73 @@ describe("failureLine", () => {
     expect(failureLine(err({ status: 403 }, "Row policy denied"), words)).not.toMatch(/Row policy/);
   });
 });
+
+/* ── shifts ── */
+import {
+  sortShifts, runningShift, canEditShift, shiftLength, shiftTimesError, latestHandoff, hoursByMember,
+} from "../src/logic.js";
+
+const NOW = new Date("2026-03-10T18:00:00.000Z");
+const shifts = [
+  { id: "s-a", member_id: "m-nanny", member_name: "Pat", started_at: "2026-03-09T08:00:00.000Z", ended_at: "2026-03-09T17:30:00.000Z", handoff: "Nap was short." },
+  { id: "s-b", member_id: "m-nanny", member_name: "Pat", started_at: "2026-03-10T08:00:00.000Z", ended_at: "", handoff: "" },
+  { id: "s-c", member_id: "m-gran", member_name: "Gran", started_at: "2026-03-10T07:00:00.000Z", ended_at: "2026-03-10T08:00:00.000Z", handoff: "" },
+  { id: "s-d", member_id: "m-nanny", member_name: "Pat", started_at: "2026-02-20T08:00:00.000Z", ended_at: "2026-02-20T12:00:00.000Z", handoff: "Old note." },
+];
+
+describe("shifts", () => {
+  it("sortShifts is newest first and leaves the input alone", () => {
+    const copy = [...shifts];
+    expect(sortShifts(shifts).map((s) => s.id)).toEqual(["s-b", "s-c", "s-a", "s-d"]);
+    expect(shifts).toEqual(copy);
+  });
+
+  it("runningShift is this member's open shift only", () => {
+    expect(runningShift(shifts, "m-nanny").id).toBe("s-b");
+    expect(runningShift(shifts, "m-gran")).toBe(null);
+    expect(runningShift(shifts, "")).toBe(null);
+  });
+
+  it("canEditShift: the writer, or any adult", () => {
+    const s = shifts[0];
+    expect(canEditShift({ id: "m-nanny" }, s, false)).toBe(true);
+    expect(canEditShift({ id: "m-kid" }, s, false)).toBe(false);
+    expect(canEditShift({ id: "m-parent" }, s, true)).toBe(true);
+    expect(canEditShift(null, s, true)).toBe(false);
+  });
+
+  it("shiftLength formats like sleep durations, and is empty while running", () => {
+    expect(shiftLength("2026-03-09T08:00:00.000Z", "2026-03-09T17:30:00.000Z")).toBe("9h 30m");
+    expect(shiftLength("2026-03-09T08:00:00.000Z", "2026-03-09T10:00:00.000Z")).toBe("2h 00m");
+    expect(shiftLength("2026-03-09T08:00:00.000Z", "2026-03-09T08:45:00.000Z")).toBe("45m");
+    expect(shiftLength("2026-03-09T08:00:00.000Z", "")).toBe("");
+    expect(shiftLength("2026-03-09T08:00:00.000Z", "2026-03-09T07:00:00.000Z")).toBe("");
+  });
+
+  it("shiftTimesError names what is wrong", () => {
+    expect(shiftTimesError("", "", NOW)).toMatch(/started/);
+    expect(shiftTimesError("2026-03-11T08:00:00.000Z", "", NOW)).toMatch(/future/);
+    expect(shiftTimesError("2026-03-10T08:00:00.000Z", null, NOW)).toMatch(/ended/);
+    expect(shiftTimesError("2026-03-10T08:00:00.000Z", "2026-03-10T07:00:00.000Z", NOW)).toMatch(/end after/);
+    expect(shiftTimesError("2026-03-10T08:00:00.000Z", "2026-03-11T08:00:00.000Z", NOW)).toMatch(/end in the future/);
+    expect(shiftTimesError("2026-03-10T08:00:00.000Z", NOW.toISOString(), NOW)).toBe("");
+    expect(shiftTimesError("2026-03-01T08:00:00.000Z", "2026-03-04T08:00:00.000Z", NOW)).toMatch(/two days/);
+    expect(shiftTimesError("2026-03-10T08:00:00.000Z", "2026-03-10T18:00:01.000Z", NOW)).toMatch(/future/);
+    expect(shiftTimesError("2026-03-10T08:00:00.000Z", "", NOW)).toBe("");
+    expect(shiftTimesError("2026-03-10T08:00:00.000Z", "2026-03-10T12:00:00.000Z", NOW)).toBe("");
+  });
+
+  it("latestHandoff is the newest ENDED shift with a note", () => {
+    expect(latestHandoff(shifts).id).toBe("s-a");
+    expect(latestHandoff([shifts[1], shifts[2]])).toBe(null);
+  });
+
+  it("hoursByMember totals ended shifts in the window, most hours first", () => {
+    expect(hoursByMember(shifts, 7, NOW)).toEqual([
+      { member_id: "m-nanny", member_name: "Pat", minutes: 570 },
+      { member_id: "m-gran", member_name: "Gran", minutes: 60 },
+    ]);
+    expect(hoursByMember(shifts, 30, NOW)[0].minutes).toBe(810);
+    expect(hoursByMember([], 7, NOW)).toEqual([]);
+  });
+});

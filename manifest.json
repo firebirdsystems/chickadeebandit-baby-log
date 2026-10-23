@@ -1,16 +1,30 @@
 {
   "id": "baby-log",
-  "contexts": ["household", "shared_space"],
+  "contexts": [
+    "household",
+    "shared_space"
+  ],
   "name": "Baby Log",
   "version": "1.0.0",
-  "description": "Track feeds, diapers, naps, and pumping for your baby — quick one-tap logging, a running sleep timer, and a daily summary every caregiver can see.",
+  "description": "Track feeds, diapers, naps, and pumping for your baby — quick one-tap logging, a running sleep timer, a daily summary every caregiver can see, and a shift log for the nanny.",
   "entrypoint": "index.html",
   "runtime": "static",
   "category": "family",
-  "tags": ["baby", "newborn", "feeding", "sleep", "diapers", "parenting"],
+  "tags": [
+    "baby",
+    "newborn",
+    "feeding",
+    "sleep",
+    "diapers",
+    "parenting",
+    "nanny",
+    "caregiver"
+  ],
   "icon": "🍼",
   "data_access": {
-    "reads": ["family.members"],
+    "reads": [
+      "family.members"
+    ],
     "writes": []
   },
   "permissions": {
@@ -19,20 +33,130 @@
   },
   "storage": "db",
   "preload": {
-    "babies": {"sql": "SELECT id, name, birth_date, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"},
-    "entries": {"sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"}
+    "babies": {
+      "sql": "SELECT id, name, birth_date, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"
+    },
+    "entries": {
+      "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"
+    },
+    "shifts": {
+      "sql": "SELECT id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at FROM app_baby_log__shifts WHERE ended_at = '' OR started_at >= date(?, '-30 days') ORDER BY started_at DESC, id DESC",
+      "params": [
+        ":today"
+      ]
+    }
   },
-  "db_plaintext_columns": ["entry_type", "birth_date"],
+  "db_plaintext_columns": [
+    "entry_type",
+    "birth_date"
+  ],
   "row_policies": {
     "babies": {
       "kind": "adult_writable"
     },
     "entries": {
-      "kind": "adult_writable"
+      "kind": "owner_or_visibility",
+      "member_column": "created_by",
+      "visibility_column": "visibility",
+      "everyone_values": [
+        "everyone"
+      ],
+      "write_visibility_scoped": true,
+      "delete_adult_only": true,
+      "column_write_acls": {
+        "created_by": {
+          "writable_by": [],
+          "actions": [
+            "update"
+          ]
+        },
+        "visibility": {
+          "writable_by": []
+        }
+      }
+    },
+    "shifts": {
+      "kind": "owner_or_visibility",
+      "member_column": "member_id",
+      "visibility_column": "visibility",
+      "everyone_values": [
+        "everyone"
+      ],
+      "write_visibility_scoped": true,
+      "delete_adult_only": true,
+      "column_write_acls": {
+        "id": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "member_name": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "started_at": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "ended_at": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "shift_date": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "summary": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "handoff": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "created_at": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "updated_at": {
+          "writable_by": [
+            "adult",
+            "owner"
+          ]
+        },
+        "member_id": {
+          "writable_by": [],
+          "actions": [
+            "update"
+          ]
+        },
+        "visibility": {
+          "writable_by": []
+        }
+      }
     }
   },
   "retention": {
     "entries": {
+      "default": 730,
+      "timestamp_column": "started_at"
+    },
+    "shifts": {
       "default": 730,
       "timestamp_column": "started_at"
     }
@@ -45,23 +169,41 @@
     "entries": {
       "column": "created_by",
       "on_removed": "keep"
+    },
+    "shifts": {
+      "column": "member_id",
+      "on_removed": "keep"
     }
   },
-  "publishes": ["baby.entry_logged"],
+  "publishes": [
+    "baby.entry_logged"
+  ],
   "publish_acls": {
-    "baby.entry_logged": { "require_role": "adult" }
+    "baby.entry_logged": {
+      "require_role": "member"
+    }
   },
-  "nav": { "label": "Baby Log" },
+  "nav": {
+    "label": "Baby Log"
+  },
   "glance": {
     "source": {
       "kind": "sql",
       "query": "SELECT b.name AS title, e.entry_type AS subtitle, e.started_at AS at FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 ORDER BY e.started_at DESC LIMIT 3"
     },
-    "display": { "template": "list", "title": "title", "subtitle": "subtitle", "when": "at" }
+    "display": {
+      "template": "list",
+      "title": "title",
+      "subtitle": "subtitle",
+      "when": "at"
+    }
   },
   "ai_access": {
     "allowed": true,
     "mode": "read",
-    "db_exports": ["recent_entries", "babies"]
+    "db_exports": [
+      "recent_entries",
+      "babies"
+    ]
   }
 }

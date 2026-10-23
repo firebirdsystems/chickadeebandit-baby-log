@@ -215,3 +215,81 @@ export function storedDiffers(row, fields) {
 }
 
 export const SAVED_AS_FIRST = "Saved as first entered — check it and update what changed.";
+
+/* ── Shifts ─────────────────────────────────────────────────────────────────
+ * A paid caregiver's shift: started, ended ('' while running), what was done,
+ * and a handoff note the next person reads first. Same shape as Elder Care's.
+ */
+
+const text = (v) => (v == null ? "" : String(v));
+
+/** Shifts newest first. */
+export function sortShifts(rows) {
+  return [...rows].sort((a, b) => text(b.started_at).localeCompare(text(a.started_at)) || text(b.id).localeCompare(text(a.id)));
+}
+
+/** The shift this member has running, or null. The newest, should there be two. */
+export function runningShift(shifts, memberId) {
+  if (!memberId) return null;
+  return sortShifts(shifts.filter((s) => s.member_id === memberId && !s.ended_at))[0] ?? null;
+}
+
+/** Who may change a shift, mirroring the hub: whoever logged it, and any adult. */
+export function canEditShift(member, shift, adult) {
+  if (!member || !shift) return false;
+  return !!adult || (!!member.id && shift.member_id === member.id);
+}
+
+/** "2h 15m" / "45m" for an ended shift, in the same format as sleep; "" while it runs or for bad times. */
+export function shiftLength(startedAt, endedAt) {
+  if (!endedAt) return "";
+  const ms = Date.parse(endedAt) - Date.parse(startedAt);
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  return fmtDuration(ms);
+}
+
+/**
+ * Why a shift's times cannot be saved, or "". `endedAt` is "" for a shift
+ * that is still running and null when the form's end was not a usable time.
+ */
+export function shiftTimesError(startedAt, endedAt, now = new Date()) {
+  if (!startedAt || !Number.isFinite(Date.parse(startedAt))) return "Choose when the shift started.";
+  if (Date.parse(startedAt) > now.getTime()) return "A shift cannot start in the future.";
+  if (endedAt === null) return "Choose when the shift ended.";
+  if (endedAt && Date.parse(endedAt) > now.getTime()) return "A shift cannot end in the future.";
+  if (endedAt && endedAt <= startedAt) return "The shift must end after it starts.";
+  // Longer than this is a wrong date, not a long day.
+  if (endedAt && Date.parse(endedAt) - Date.parse(startedAt) > 48 * 3_600_000) return "A shift cannot be longer than two days. Check the dates.";
+  return "";
+}
+
+/**
+ * The note the next person should read first: the handoff of the most
+ * recently ENDED shift that left one. A running shift has not handed anything
+ * over yet. null when there is none.
+ */
+export function latestHandoff(shifts) {
+  return [...shifts]
+    .filter((s) => s.ended_at && text(s.handoff).trim() !== "")
+    .sort((a, b) => text(b.ended_at).localeCompare(text(a.ended_at)) || text(b.id).localeCompare(text(a.id)))[0] ?? null;
+}
+
+/**
+ * Minutes worked per member over the ended shifts that started in the last
+ * `days` days, as [{ member_id, member_name, minutes }] most hours first. A
+ * running shift is not counted: its length is not known yet.
+ */
+export function hoursByMember(shifts, days = 7, now = new Date()) {
+  const since = now.getTime() - days * 86_400_000;
+  const totals = new Map();
+  for (const s of shifts) {
+    if (!s.ended_at) continue;
+    const start = Date.parse(s.started_at), end = Date.parse(s.ended_at);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || start < since) continue;
+    const cur = totals.get(s.member_id) ?? { member_id: s.member_id, member_name: s.member_name ?? "", minutes: 0 };
+    cur.minutes += Math.round((end - start) / 60_000);
+    if (!cur.member_name && s.member_name) cur.member_name = s.member_name;
+    totals.set(s.member_id, cur);
+  }
+  return [...totals.values()].sort((a, b) => b.minutes - a.minutes || text(a.member_id).localeCompare(text(b.member_id)));
+}

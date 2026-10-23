@@ -1,79 +1,289 @@
 {
   "scenarios": [
     {
-      "name": "every member can read the caregiver log, but only adults can write it",
-      "members": { "parent": "adult", "sibling": "child" },
+      "name": "every member reads the log and logs under their own name, a guest nanny included; the hub stamps the writer; anyone may correct an entry; only an adult removes one or manages the children",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest",
+        "sibling": "child"
+      },
+      "granted": [
+        "nanny"
+      ],
       "steps": [
         {
           "action": "seedRaw",
           "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
-          "params": ["{{parent}}"]
+          "params": [
+            "{{parent}}"
+          ]
         },
         {
           "action": "seedRaw",
           "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, amount_ml, feed_kind, created_by, created_at) VALUES ('e1', 'b1', 'feed', '2026-01-02T08:00:00Z', 90, 'bottle', ?, '2026-01-02T08:00:00Z')",
-          "params": ["{{parent}}"]
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "SELECT id, visibility FROM app_baby_log__entries",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "e1",
+                "visibility": "everyone"
+              }
+            ]
+          }
         },
         {
           "action": "db",
           "as": "sibling",
           "sql": "SELECT id FROM app_baby_log__entries",
-          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "e1" }] }
+          "expect": {
+            "status": 200,
+            "rowCount": 1
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "e2",
+            "b1",
+            "diaper",
+            "2026-01-02T09:00:00Z",
+            null,
+            null,
+            "",
+            "wet",
+            "",
+            "{{parent}}",
+            "Pat",
+            "2026-01-02T09:00:00Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, created_by_name FROM app_baby_log__entries WHERE created_by = ?",
+          "params": [
+            "{{nanny}}"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "e2",
+                "created_by_name": "Pat"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, created_by, created_by_name, created_at) VALUES ('e3', 'b1', 'sleep', '2026-01-02T10:00:00Z', ?, 'Pat', '2026-01-02T10:00:00Z')",
+          "params": [
+            "{{nanny}}"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ?",
+          "params": [
+            "2026-01-02T11:30:00Z",
+            "e3"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "SELECT id, ended_at FROM app_baby_log__entries WHERE id = ?",
+          "params": [
+            "e3"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "e3",
+                "ended_at": "2026-01-02T11:30:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__entries SET amount_ml = ? WHERE id = ?",
+          "params": [
+            100,
+            "e1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, amount_ml FROM app_baby_log__entries WHERE id = ?",
+          "params": [
+            "e1"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "e1",
+                "amount_ml": 100
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__entries SET created_by = ? WHERE id = ?",
+          "params": [
+            "{{nanny}}",
+            "e1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__entries SET visibility = ? WHERE id = ?",
+          "params": [
+            "family",
+            "e1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "DELETE FROM app_baby_log__entries WHERE id = ?",
+          "params": [
+            "e2"
+          ],
+          "expect": {
+            "status": 403
+          }
         },
         {
           "action": "db",
           "as": "sibling",
-          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, created_by, created_at) VALUES ('e2', 'b1', 'diaper', '2026-01-02T09:00:00Z', ?, '2026-01-02T09:00:00Z')",
-          "params": ["{{sibling}}"],
-          "expect": { "status": 403 }
+          "sql": "DELETE FROM app_baby_log__entries WHERE id = ?",
+          "params": [
+            "e2"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "DELETE FROM app_baby_log__entries WHERE id = ?",
+          "params": [
+            "e2"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b2', 'Rowan', '2026-02-01', '👶', 0, ?, '2026-02-01T00:00:00Z')",
+          "params": [
+            "{{nanny}}"
+          ],
+          "expect": {
+            "status": 403
+          }
         },
         {
           "action": "db",
           "as": "sibling",
           "sql": "UPDATE app_baby_log__babies SET archived = 1 WHERE id = 'b1'",
-          "expect": { "status": 403 }
-        },
-        {
-          "action": "db",
-          "as": "parent",
-          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, created_by, created_at) VALUES ('e3', 'b1', 'diaper', '2026-01-02T09:30:00Z', ?, '2026-01-02T09:30:00Z')",
-          "params": ["{{parent}}"],
-          "expect": { "status": 200 }
+          "expect": {
+            "status": 403
+          }
         },
         {
           "action": "db",
           "as": "parent",
           "sql": "SELECT id FROM app_baby_log__entries WHERE baby_id = 'b1'",
-          "expect": { "status": 200, "rowCount": 2 }
-        },
-        {
-          "action": "db",
-          "as": "parent",
-          "sql": "SELECT archived FROM app_baby_log__babies WHERE id = 'b1'",
-          "expect": { "status": 200, "rowsContain": [{ "archived": 0 }] }
+          "expect": {
+            "status": 200,
+            "rowCount": 2
+          }
         }
       ]
     },
     {
       "name": "the AI exports return seeded babies and the entry log newest first",
-      "members": { "parent": "adult" },
+      "members": {
+        "parent": "adult"
+      },
       "steps": [
         {
           "action": "seedRaw",
           "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', 0, ?, '2026-01-01T00:00:00Z')",
-          "params": ["{{parent}}"]
+          "params": [
+            "{{parent}}"
+          ]
         },
         {
           "action": "seedRaw",
           "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, created_by, created_at) VALUES ('e_old', 'b1', 'sleep', '2026-01-02T01:00:00Z', '2026-01-02T03:00:00Z', NULL, ?, '2026-01-02T01:00:00Z'), ('e_new', 'b1', 'feed', '2026-01-02T05:00:00Z', NULL, 120, ?, '2026-01-02T05:00:00Z')",
-          "params": ["{{parent}}", "{{parent}}"]
+          "params": [
+            "{{parent}}",
+            "{{parent}}"
+          ]
         },
         {
           "action": "named",
           "as": "parent",
           "kind": "query",
           "name": "babies",
-          "expect": { "status": 200, "rowCount": 1, "rowsContain": [{ "id": "b1", "name": "Juniper", "birth_date": "2025-12-01" }] }
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "b1",
+                "name": "Juniper",
+                "birth_date": "2025-12-01"
+              }
+            ]
+          }
         },
         {
           "action": "named",
@@ -84,32 +294,471 @@
             "status": 200,
             "rowCount": 2,
             "rowsContain": [
-              { "id": "e_new", "entry_type": "feed", "amount_ml": 120 },
-              { "id": "e_old", "entry_type": "sleep", "ended_at": "2026-01-02T03:00:00Z" }
+              {
+                "id": "e_new",
+                "entry_type": "feed",
+                "amount_ml": 120
+              },
+              {
+                "id": "e_old",
+                "entry_type": "sleep",
+                "ended_at": "2026-01-02T03:00:00Z"
+              }
             ]
           }
         }
       ]
     },
     {
-      "name": "only an adult caregiver may publish baby.entry_logged",
-      "members": { "parent": "adult", "sibling": "child" },
+      "name": "every member who can log may publish baby.entry_logged, so a nanny's feed reaches automations too",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest",
+        "sibling": "child"
+      },
+      "granted": [
+        "nanny"
+      ],
       "steps": [
+        {
+          "action": "publish",
+          "as": "nanny",
+          "type": "baby.entry_logged",
+          "subject_id": "e1",
+          "payload": {
+            "baby_id": "b1",
+            "entry_type": "feed",
+            "started_at": "2026-01-02T08:00:00Z",
+            "amount_ml": 90
+          },
+          "expect": {
+            "status": 201
+          }
+        },
         {
           "action": "publish",
           "as": "sibling",
           "type": "baby.entry_logged",
-          "subject_id": "e1",
-          "payload": { "baby_id": "b1", "entry_type": "feed", "started_at": "2026-01-02T08:00:00Z", "amount_ml": 90 },
-          "expect": { "status": 403 }
+          "subject_id": "e2",
+          "payload": {
+            "baby_id": "b1",
+            "entry_type": "diaper",
+            "started_at": "2026-01-02T09:00:00Z",
+            "amount_ml": null
+          },
+          "expect": {
+            "status": 201
+          }
         },
         {
           "action": "publish",
           "as": "parent",
           "type": "baby.entry_logged",
-          "subject_id": "e1",
-          "payload": { "baby_id": "b1", "entry_type": "feed", "started_at": "2026-01-02T08:00:00Z", "amount_ml": 90 },
-          "expect": { "status": 201 }
+          "subject_id": "e3",
+          "payload": {
+            "baby_id": "b1",
+            "entry_type": "feed",
+            "started_at": "2026-01-02T10:00:00Z",
+            "amount_ml": 90
+          },
+          "expect": {
+            "status": 201
+          }
+        }
+      ]
+    },
+    {
+      "name": "a nanny signed in as a guest logs a shift: the hub stamps it with them whatever they claim, they end it and write the handoff, a parent corrects it, a stale guarded save changes nothing, a child changes nothing, and only an adult removes it",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest",
+        "sibling": "child"
+      },
+      "granted": [
+        "nanny"
+      ],
+      "steps": [
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__shifts (id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "s1",
+            "{{parent}}",
+            "Pat",
+            "2026-01-05T08:00:00.000Z",
+            "",
+            "2026-01-05",
+            "",
+            "",
+            "2026-01-05T08:00:00.000Z",
+            "2026-01-05T08:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, visibility FROM app_baby_log__shifts WHERE member_id = ?",
+          "params": [
+            "{{nanny}}"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "s1",
+                "visibility": "everyone"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__shifts WHERE member_id = ?",
+          "params": [
+            "{{parent}}"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 0
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "SELECT id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at FROM app_baby_log__shifts WHERE ended_at = '' OR started_at >= date(?, '-30 days') ORDER BY started_at DESC, id DESC",
+          "params": [
+            "2026-03-01"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "s1",
+                "ended_at": ""
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__shifts SET started_at = ?, ended_at = ?, shift_date = ?, summary = ?, handoff = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+          "params": [
+            "2026-01-05T08:00:00.000Z",
+            "2026-01-05T17:30:00.000Z",
+            "2026-01-05",
+            "Two bottles and a long nap",
+            "Last bottle at 4:40",
+            "2026-01-05T17:30:00.000Z",
+            "s1",
+            "2026-01-05T08:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__shifts SET handoff = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+          "params": [
+            "stale",
+            "2026-01-05T18:00:00.000Z",
+            "s1",
+            "2026-01-05T08:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "SELECT id, handoff, updated_at FROM app_baby_log__shifts WHERE id = ?",
+          "params": [
+            "s1"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "s1",
+                "handoff": "Last bottle at 4:40",
+                "updated_at": "2026-01-05T17:30:00.000Z"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "SELECT id, summary, handoff, ended_at FROM app_baby_log__shifts",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "s1",
+                "summary": "Two bottles and a long nap",
+                "handoff": "Last bottle at 4:40",
+                "ended_at": "2026-01-05T17:30:00.000Z"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "SELECT id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at FROM app_baby_log__shifts WHERE ended_at = '' OR started_at >= date(?, '-30 days') ORDER BY started_at DESC, id DESC",
+          "params": [
+            "2026-03-01"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 0
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "UPDATE app_baby_log__shifts SET ended_at = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+          "params": [
+            "2026-01-05T17:45:00.000Z",
+            "2026-01-05T19:00:00.000Z",
+            "s1",
+            "2026-01-05T17:30:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "UPDATE app_baby_log__shifts SET handoff = ? WHERE id = ?",
+          "params": [
+            "mine now",
+            "s1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, handoff, ended_at FROM app_baby_log__shifts WHERE id = ?",
+          "params": [
+            "s1"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "s1",
+                "handoff": "Last bottle at 4:40",
+                "ended_at": "2026-01-05T17:45:00.000Z"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__shifts SET member_id = ? WHERE id = ?",
+          "params": [
+            "{{parent}}",
+            "s1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__shifts SET visibility = ? WHERE id = ?",
+          "params": [
+            "family",
+            "s1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "DELETE FROM app_baby_log__shifts WHERE id = ?",
+          "params": [
+            "s1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "DELETE FROM app_baby_log__shifts WHERE id = ?",
+          "params": [
+            "s1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "DELETE FROM app_baby_log__shifts WHERE id = ?",
+          "params": [
+            "s1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__shifts",
+          "expect": {
+            "status": 200,
+            "rowCount": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "one running shift per person: a second start from another tab is refused while the first runs, another person can start their own, and a new one starts once the first has ended",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest"
+      },
+      "granted": [
+        "nanny"
+      ],
+      "steps": [
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__shifts (id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "s1",
+            "{{nanny}}",
+            "Pat",
+            "2026-01-05T08:00:00.000Z",
+            "",
+            "2026-01-05",
+            "",
+            "",
+            "2026-01-05T08:00:00.000Z",
+            "2026-01-05T08:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__shifts (id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "s2",
+            "{{nanny}}",
+            "Pat",
+            "2026-01-05T08:01:00.000Z",
+            "",
+            "2026-01-05",
+            "",
+            "",
+            "2026-01-05T08:01:00.000Z",
+            "2026-01-05T08:01:00.000Z"
+          ],
+          "expect": {
+            "status": 400
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__shifts (id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "s3",
+            "{{parent}}",
+            "Alex",
+            "2026-01-05T08:02:00.000Z",
+            "",
+            "2026-01-05",
+            "",
+            "",
+            "2026-01-05T08:02:00.000Z",
+            "2026-01-05T08:02:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__shifts SET ended_at = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+          "params": [
+            "2026-01-05T17:00:00.000Z",
+            "2026-01-05T17:00:00.000Z",
+            "s1",
+            "2026-01-05T08:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__shifts (id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "s4",
+            "{{nanny}}",
+            "Pat",
+            "2026-01-06T08:00:00.000Z",
+            "",
+            "2026-01-06",
+            "",
+            "",
+            "2026-01-06T08:00:00.000Z",
+            "2026-01-06T08:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__shifts WHERE ended_at = '' ORDER BY id",
+          "expect": {
+            "status": 200,
+            "rowCount": 2,
+            "rowsContain": [
+              {
+                "id": "s3"
+              },
+              {
+                "id": "s4"
+              }
+            ]
+          }
         }
       ]
     }
