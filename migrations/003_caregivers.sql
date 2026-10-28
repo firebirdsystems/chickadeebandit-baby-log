@@ -31,7 +31,7 @@ ALTER TABLE app_baby_log__entries ADD COLUMN created_by_name TEXT NOT NULL DEFAU
 -- encrypted. The hub stamps `member_id` with the caller; the writer may change
 -- their own shift, an adult may change or remove any.
 CREATE TABLE IF NOT EXISTS app_baby_log__shifts (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   member_id TEXT NOT NULL,
   member_name TEXT NOT NULL DEFAULT '',
   started_at TEXT NOT NULL,

@@ -20,7 +20,7 @@
 -- Free-text (`name`, `note`, `feed_kind`, `diaper_kind`) stays encrypted; it
 -- is only ever displayed, never filtered in SQL.
 CREATE TABLE IF NOT EXISTS app_baby_log__babies (
-  id         TEXT PRIMARY KEY,
+  id         TEXT NOT NULL PRIMARY KEY,
   name       TEXT NOT NULL,
   birth_date TEXT NOT NULL DEFAULT '',   -- ISO YYYY-MM-DD; used for age display
   emoji      TEXT NOT NULL DEFAULT '👶',
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS app_baby_log__babies (
 );
 
 CREATE TABLE IF NOT EXISTS app_baby_log__entries (
-  id         TEXT PRIMARY KEY,
+  id         TEXT NOT NULL PRIMARY KEY,
   baby_id    TEXT NOT NULL,
   entry_type TEXT NOT NULL DEFAULT 'feed',  -- feed|diaper|sleep|pump|note
   started_at TEXT NOT NULL,                 -- ISO datetime the event began
