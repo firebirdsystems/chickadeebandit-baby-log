@@ -650,3 +650,112 @@ export function recordUrl(reportsUrl, id, format, from, to, base) {
   if (to) url.searchParams.set("to", to);
   return url.toString();
 }
+
+/* ── Reminders (manifest interval_reminders) ──────────────────────────────── */
+// The hub sends these from the household scheduler; the page only stores how
+// long each wait is (whole minutes on the child's row, NULL = off) and shows
+// when the next one falls due. The rules below are the hub's, restated so the
+// page shows the time the hub will act on.
+
+export const REMINDER_KINDS = [
+  { id: "feed", column: "feed_interval_min", label: "Feed", what: "since the last feed started" },
+  { id: "wake_window", column: "wake_window_min", label: "Wake window", what: "since the last sleep ended" },
+  { id: "long_nap", column: "max_nap_min", label: "Long sleep", what: "while a sleep is running. A night’s sleep counts too, so this sends one every night it is on" },
+];
+
+/** The hub's bounds: 1 minute to 72 hours. Anything else is off. */
+export const MAX_REMINDER_MINUTES = 4320;
+
+/** A child's interval for one kind in whole minutes, or null when it is off. */
+export function reminderMinutes(baby, kind) {
+  const raw = baby?.[kind.column];
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const minutes = Math.floor(n);
+  return minutes >= 1 && minutes <= MAX_REMINDER_MINUTES ? minutes : null;
+}
+
+// Wake windows lengthen fast in the first year; feeds space out more slowly.
+// [age in days below which, minutes]. A starting point a parent can change,
+// never advice: the page says so beside it. Long sleep has none: any value
+// fires every night (a night's sleep is a sleep), so a parent picks it on
+// purpose or leaves it off.
+const SUGGESTED = {
+  feed: [[56, 180], [183, 210], [Infinity, 240]],
+  wake_window: [[28, 60], [56, 75], [91, 90], [122, 105], [183, 135], [274, 165], [365, 195], [548, 270], [Infinity, 330]],
+};
+const SUGGESTED_UNKNOWN_AGE = { feed: 180, wake_window: 90 };
+
+/** The value the Reminders tab marks as suggested for the child's age, or null (long sleep). */
+export function suggestedMinutes(kindId, birthDate, now = new Date()) {
+  if (!SUGGESTED[kindId]) return null;
+  const born = new Date(`${birthDate}T12:00:00`);
+  if (!birthDate || Number.isNaN(born.getTime()) || born > now) return SUGGESTED_UNKNOWN_AGE[kindId];
+  const days = Math.floor((now - born) / 86400000);
+  return SUGGESTED[kindId].find(([below]) => days < below)[1];
+}
+
+/** "45 min" / "3 h" / "2 h 15 min". */
+export function fmtMinutes(minutes) {
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  if (!h) return `${m} min`;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+/**
+ * The choices for one kind: quarter hours across the range a family would
+ * pick from, plus the stored value and the suggestion when they fall off that
+ * grid (a value written some other way is shown, not silently changed).
+ */
+export function reminderChoices(kindId, ...keep) {
+  const [from, to] = kindId === "feed" ? [60, 360] : kindId === "wake_window" ? [30, 420] : [30, 300];
+  const set = new Set();
+  for (let m = from; m <= to; m += 15) set.add(m);
+  for (const m of keep) if (Number.isInteger(m) && m >= 1 && m <= MAX_REMINDER_MINUTES) set.add(m);
+  return [...set].sort((a, b) => a - b);
+}
+
+// The hub ranks only `toISOString()` instants and ignores any other shape.
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/** The latest row by `column`, ties by id; rows whose `column` is not an instant are ignored. */
+function latestBy(rows, column) {
+  let best = null;
+  for (const row of rows) {
+    if (!INSTANT.test(row[column] ?? "")) continue;
+    if (!best || row[column] > best[column] || (row[column] === best[column] && String(row.id) > String(best.id))) best = row;
+  }
+  return best;
+}
+
+/**
+ * When each of a child's reminders falls due next, by the hub's rules:
+ *   - feed: the latest feed's start, plus the interval.
+ *   - wake window: the latest sleep (by when it started). While that sleep is
+ *     running there is nothing to wait for; once it ends, its end plus the
+ *     interval. An earlier nap added afterwards changes nothing.
+ *   - long sleep: only while the latest sleep is running (no end, NULL), its
+ *     start plus the interval.
+ * Returns [{ kind, minutes, dueAt }] for the reminders that are on and have
+ * something to count from, in REMINDER_KINDS order.
+ */
+export function nextReminders(baby, entries) {
+  const own = entries.filter((e) => e.baby_id === baby.id);
+  const feed = latestBy(own.filter((e) => e.entry_type === "feed"), "started_at");
+  const sleep = latestBy(own.filter((e) => e.entry_type === "sleep"), "started_at");
+  // The wake window waits while the latest sleep has no end (NULL or ''); the
+  // long-sleep kind counts only a NULL end, as the manifest's
+  // running_when { ended_at: null } does.
+  const anchors = {
+    feed: feed?.started_at,
+    wake_window: sleep && INSTANT.test(sleep.ended_at ?? "") ? sleep.ended_at : null,
+    long_nap: sleep && sleep.ended_at == null ? sleep.started_at : null,
+  };
+  const out = [];
+  for (const kind of REMINDER_KINDS) {
+    const minutes = reminderMinutes(baby, kind);
+    if (minutes == null || !anchors[kind.id]) continue;
+    out.push({ kind, minutes, dueAt: new Date(new Date(anchors[kind.id]).getTime() + minutes * 60000) });
+  }
+  return out;
+}

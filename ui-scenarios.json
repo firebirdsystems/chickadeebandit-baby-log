@@ -1,0 +1,132 @@
+{
+  "scenarios": [
+    {
+      "name": "a parent turns on the feed reminder for one child and it stays on after a reload; the log says when it falls due (a feed half an hour ago, so the reminder is ahead), to the nanny too, who has no Reminders tab",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest"
+      },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2026-01-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES ('f1', 'b1', 'feed', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 minutes'), '', NULL, 120, 'bottle', '', '', ?, 'Alex', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 minutes'))",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "open",
+          "as": "parent"
+        },
+        {
+          "action": "expectCount",
+          "as": "parent",
+          "selector": "[data-testid=\"next-reminders\"]",
+          "count": 0
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-testid=\"tab-reminders\"]"
+        },
+        {
+          "action": "expectVisible",
+          "as": "parent",
+          "selector": "[data-testid=\"reminders-form\"]"
+        },
+        {
+          "action": "select",
+          "as": "parent",
+          "selector": "#rem-feed",
+          "value": "180"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-testid=\"reminders-save\"]"
+        },
+        {
+          "action": "expectVisible",
+          "as": "parent",
+          "selector": "[data-testid=\"reminders-save\"]:not([disabled])"
+        },
+        {
+          "action": "reload",
+          "as": "parent"
+        },
+        {
+          "action": "expectText",
+          "as": "parent",
+          "selector": "[data-testid=\"next-reminders\"]",
+          "text": "Feed reminder"
+        },
+        {
+          "action": "expectNoText",
+          "as": "parent",
+          "selector": "[data-testid=\"next-reminders\"]",
+          "text": "Wake window"
+        },
+        {
+          "action": "open",
+          "as": "nanny"
+        },
+        {
+          "action": "expectText",
+          "as": "nanny",
+          "selector": "[data-testid=\"next-reminders\"]",
+          "text": "Feed due"
+        },
+        {
+          "action": "expectCount",
+          "as": "nanny",
+          "selector": "[data-testid=\"tab-reminders\"]",
+          "count": 0
+        }
+      ]
+    },
+    {
+      "name": "in a shared space the Reminders tab says they are sent from a household's own Baby Log and offers no settings",
+      "context": "shared_space",
+      "members": {
+        "steward": "admin",
+        "parent": "adult"
+      },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2026-01-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "open",
+          "as": "parent"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-testid=\"tab-reminders\"]"
+        },
+        {
+          "action": "expectVisible",
+          "as": "parent",
+          "selector": "[data-testid=\"reminders-unsupported\"]"
+        },
+        {
+          "action": "expectCount",
+          "as": "parent",
+          "selector": "[data-testid=\"reminders-form\"]",
+          "count": 0
+        }
+      ]
+    }
+  ]
+}

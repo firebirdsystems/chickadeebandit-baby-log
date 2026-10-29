@@ -136,6 +136,7 @@ import {
   sortShifts, runningShift, canEditShift, shiftLength, shiftTimesError, latestHandoff, hoursByMember,
   localStamp, defaultUnits, gramsFrom, mmFrom, lbOz, fmtWeight, fmtLength, lengthValue, growthError, sortGrowth,
   growthSeries, chartPoints, ageInDays, whoPercentile, percentileLabel, percentileChart, WHO_MEASURES, defaultRecordRange, recordRangeError, recordUrl,
+  REMINDER_KINDS, reminderMinutes, suggestedMinutes, fmtMinutes, reminderChoices, nextReminders,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -166,7 +167,7 @@ let babies = [];
 let entries = [];
 let shifts = [];
 let growth = [];
-let view = "log";       // "log" | "growth" | "report" | "shifts"
+let view = "log";       // "log" | "growth" | "report" | "shifts" | "reminders"
 let currentBabyId = null;
 let searchQ = "";       // in-app search (see logic.js searchableFields)
 let error = "";
@@ -242,10 +243,10 @@ async function loadMembers() {
 
 async function loadBabies() {
   if (!DB) {
-    babies = [{ id: "demo-baby", name: "Willow", birth_date: "2026-04-20", sex: "female", emoji: "👶", archived: 0, created_by: "demo-1", created_at: nowIso() }];
+    babies = [{ id: "demo-baby", name: "Willow", birth_date: "2026-04-20", sex: "female", emoji: "👶", archived: 0, feed_interval_min: 210, wake_window_min: null, max_nap_min: null, created_by: "demo-1", created_at: nowIso() }];
     return;
   }
-  const res = await db("SELECT id, name, birth_date, sex, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at");
+  const res = await db("SELECT id, name, birth_date, sex, emoji, archived, feed_interval_min, wake_window_min, max_nap_min, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at");
   babies = res.rows ?? [];
 }
 
@@ -312,7 +313,8 @@ async function refresh() {
     if (!currentBabyId || !babies.some((b) => b.id === currentBabyId)) currentBabyId = babies[0]?.id ?? null;
     loadFailed = false;
     render();
-  } catch { loadFailed = true; render(); }
+  } catch { loadFailed = true; render(); return; }
+  loadReminderStatus();
 }
 
 function showError(msg) { error = msg; render(); }
@@ -418,6 +420,34 @@ async function setBabySex(id, sex) {
     babies = gone === true ? prev.filter((b) => b.id !== id) : prev;
     showError(unchangedWriteLine(gone, words));
   }
+}
+
+// How long each reminder waits, for one child. Adults only (the babies row
+// policy). The hub reads these columns on its next run; the status is re-read
+// so the tab shows what the hub now watches.
+let savingReminders = false;
+async function saveReminders(id, values) {
+  if (savingReminders) return;
+  savingReminders = true;
+  const prev = babies;
+  babies = babies.map((b) => (b.id === id ? { ...b, ...values } : b));
+  error = "";
+  render();
+  const words = { action: "save the reminders", thing: "child" };
+  let res, failure = null;
+  try {
+    res = await db("UPDATE app_baby_log__babies SET feed_interval_min = ?, wake_window_min = ?, max_nap_min = ? WHERE id = ?",
+      [values.feed_interval_min, values.wake_window_min, values.max_nap_min, id]);
+  } catch (e) { console.error(e); failure = failureLine(e, words); }
+  if (!failure && changedNothing(res)) {
+    const gone = await rowGone("app_baby_log__babies", id);
+    babies = gone === true ? prev.filter((b) => b.id !== id) : prev;
+    failure = unchangedWriteLine(gone, words);
+  } else if (failure) babies = prev;
+  savingReminders = false;
+  if (failure) { showError(failure); return; }
+  render();
+  loadReminderStatus();
 }
 
 async function saveEntry(fields, existingId, pinHost = null, opened = null) {
@@ -1016,6 +1046,110 @@ function renderGrowth(baby) {
   `;
 }
 
+/* ── Reminders ─────────────────────────────────────────────────────────────── */
+// The hub sends them (manifest interval_reminders); this tab stores how long
+// each one waits and shows what the hub is watching. The status is the hub's
+// answer for the household: whether reminders run here at all (not yet in a
+// shared space), which ones are over the household's allowance, and whether
+// the follow-up alert is part of the plan. The hub refuses a guest the
+// status, and only an adult may change a child, so the tab is adults' only.
+const REMINDER_STATUS = "api/reminders-interval-status";
+let reminderStatus = null;          // the hub's answer, or null while unknown
+let reminderStatusFailed = false;
+async function loadReminderStatus() {
+  if (!canManage() || me?.role === "guest") return;
+  if (!DB) {
+    reminderStatus = {
+      entitled: true, escalation_entitled: true, context_unsupported: false, cap: 10, app_monitored_count: 1, unmonitored: [],
+    };
+    render();
+    return;
+  }
+  try {
+    const res = await fetch(REMINDER_STATUS, { headers: { Accept: "application/json" } });
+    const body = res.ok ? await res.json().catch(() => null) : null;
+    if (!body || typeof body !== "object" || body.error) throw new Error(`reminder status ${res.status}`);
+    reminderStatus = body;
+    reminderStatusFailed = false;
+  } catch (e) {
+    console.error(e);
+    reminderStatusFailed = true;
+  }
+  // Only the views that show the status are redrawn: a render rebuilds the
+  // whole page and would throw away a form being filled in on another tab.
+  if (view === "reminders" || view === "log") render();
+}
+
+/** True when the hub says it is not sending this child's reminder (over the allowance). */
+function reminderUnmonitored(babyId, kindId) {
+  return (reminderStatus?.unmonitored ?? []).some((u) => u.subject_id === babyId && u.kind_id === kindId);
+}
+
+// "Feed reminder at 3:40 PM · Wake window reminder at 4:10 PM", under the day's
+// summary. Nothing in a shared space, where the hub does not send them. Without
+// the hub's status (a guest is refused it; or the check failed) whether it is
+// sent is unknown, so the line gives the due time the parents set, which is
+// true either way: "Feed due 3:40 PM".
+function nextRemindersHtml(baby) {
+  if (reminderStatus?.context_unsupported) return "";
+  const due = nextReminders(baby, entries);
+  // The hub gives up on a reminder 120 minutes after it fell due
+  // (MAX_LATE_MINUTES), so the page stops showing it then too.
+  const now = Date.now();
+  const live = due.filter(({ dueAt }) => now - dueAt.getTime() <= 120 * 60000);
+  if (!live.length) return "";
+  const known = !!reminderStatus && !reminderStatusFailed;
+  const parts = live.map(({ kind, dueAt }) => {
+    const clock = fmtClock(dueAt.toISOString());
+    const past = dueAt.getTime() <= now;
+    if (!known) return `${kind.label} ${past ? "was due" : "due"} ${clock}`;
+    return `${kind.label} reminder ${past ? "was due" : "at"} ${clock}${reminderUnmonitored(baby.id, kind.id) ? " (not being sent)" : ""}`;
+  });
+  return `<p class="muted tiny" data-testid="next-reminders" style="margin:8px 2px 0">${esc(parts.join(" · "))}</p>`;
+}
+
+function renderReminders(baby) {
+  // A failed status check still shows the settings, under a banner: saving
+  // does not need the status, and a parent must be able to turn a reminder off.
+  if (!reminderStatus && !reminderStatusFailed) return `<div class="card empty">Checking the reminders…</div>`;
+  // Any failed check says so, including a refresh after an earlier success:
+  // the answer kept from then may be out of date.
+  const banner = reminderStatusFailed ? `<div class="load-error" role="alert" data-testid="reminders-status-error"><span>Couldn’t check which reminders the hub is sending.</span> <button type="button" class="load-error-retry" data-reminders-retry>Try again</button></div>` : "";
+  if (reminderStatus?.context_unsupported) {
+    return `<div class="card stack" data-testid="reminders-unsupported">
+      <h2>Reminders</h2>
+      <div class="tiny">Reminders are sent in a household’s own Baby Log, not yet in a shared space. Set them up in the Baby Log of the home the baby is in.</div>
+    </div>`;
+  }
+  const notes = [
+    "While someone has a shift running, a reminder goes to whoever is on shift. Otherwise it goes to the adults.",
+    reminderStatus?.escalation_entitled
+      ? "If the reminder still stands 30 minutes later (no new feed or sleep logged, or the long sleep still going), the adults are told too."
+      : "",
+  ].filter(Boolean);
+  return `${banner}
+    <div class="section-head"><h2>Reminders for ${esc(baby.name)}</h2></div>
+    <form class="card stack" id="reminders-form" data-baby-id="${esc(baby.id)}" data-testid="reminders-form">
+      ${REMINDER_KINDS.map((kind) => {
+        const current = reminderMinutes(baby, kind);
+        const suggested = suggestedMinutes(kind.id, baby.birth_date);
+        const options = reminderChoices(kind.id, current, suggested).map((m) =>
+          `<option value="${m}" ${m === current ? "selected" : ""}>${esc(fmtMinutes(m))}${suggested != null && m === suggested ? " (suggested for age)" : ""}</option>`).join("");
+        return `
+        <div class="field">
+          <label for="rem-${kind.id}">${esc(kind.label)}</label>
+          <select id="rem-${kind.id}" data-reminder="${kind.id}">
+            <option value="" ${current == null ? "selected" : ""}>Off</option>${options}
+          </select>
+          <div class="muted tiny">${esc(kind.what)}${current != null && reminderUnmonitored(baby.id, kind.id) ? ". <strong>Not being sent: the household is using all of its reminder slots.</strong>" : ""}</div>
+        </div>`;
+      }).join("")}
+      <p class="muted tiny">Suggestions go by ${esc(baby.name)}’s age. They are a starting point, not medical advice: your pediatrician knows your baby.</p>
+      <p class="muted tiny">${esc(notes.join(" "))}</p>
+      <div class="modal-actions"><button type="submit" class="btn" data-testid="reminders-save" ${savingReminders ? "disabled" : ""}>Save reminders</button></div>
+    </form>`;
+}
+
 /* ── The doctor-visit report ───────────────────────────────────────────────── */
 // The hub renders these documents from the manifest's `reports`, as whoever
 // asks, through the same row policies as the page's own reads; the full record
@@ -1080,6 +1214,7 @@ function viewTabsHtml() {
         <button class="tab ${view === "growth" ? "active" : ""}" data-view="growth">Growth</button>
         <button class="tab ${view === "shifts" ? "active" : ""}" data-view="shifts">Shifts</button>
         ${canReport() ? `<button class="tab ${view === "report" ? "active" : ""}" data-view="report">Report</button>` : ""}
+        ${canManage() ? `<button class="tab ${view === "reminders" ? "active" : ""}" data-view="reminders" data-testid="tab-reminders">Reminders</button>` : ""}
         ${canManage() ? `<button class="btn btn-ghost btn-sm" data-add-baby>+ Child</button>` : ""}
       </div>`;
 }
@@ -1129,7 +1264,23 @@ document.addEventListener("input", (e) => {
   if (next) { next.focus(); next.setSelectionRange(caret, caret); }
 });
 
+// Every redraw rebuilds the page from state, and a status answer can land while
+// a parent is mid-change on the Reminders tab: carry the form's choices over
+// for the same child, so only a save or a child switch replaces them.
 function render() {
+  const form = document.getElementById("reminders-form");
+  const draft = form && [...form.querySelectorAll("[data-reminder]")].map((el) => [el.dataset.reminder, el.value]);
+  drawPage();
+  const next = document.getElementById("reminders-form");
+  if (draft && next && next.dataset.babyId === form.dataset.babyId) {
+    for (const [id, value] of draft) {
+      const el = next.querySelector(`[data-reminder="${id}"]`);
+      if (el && [...el.options].some((o) => o.value === value)) el.value = value;
+    }
+  }
+}
+
+function drawPage() {
   const root = document.getElementById("root");
   root.className = "app-root";
 
@@ -1177,13 +1328,14 @@ function render() {
       ${viewTabsHtml()}
     </div>
     ${error ? `<div class="error">${esc(error)}</div>` : ""}
-    ${view === "growth" || view === "log" ? babyTabs : ""}
-    ${view === "shifts" ? renderShifts() : view === "report" && canReport() ? renderReport() : view === "growth" ? renderGrowth(baby) : `
+    ${view === "growth" || view === "log" || view === "reminders" ? babyTabs : ""}
+    ${view === "shifts" ? renderShifts() : view === "report" && canReport() ? renderReport() : view === "growth" ? renderGrowth(baby) : view === "reminders" && canManage() ? renderReminders(baby) : `
     <div class="summary">
       <div class="stat"><span class="v">${today.feedCount}</span><span class="k">Feeds today</span></div>
       <div class="stat"><span class="v">${today.lastFeedAt ? esc(timeAgo(today.lastFeedAt)) : "—"}</span><span class="k">Last feed</span></div>
       <div class="stat"><span class="v">${today.sleepMs ? esc(fmtDuration(today.sleepMs)) : "—"}${today.sleeping ? ` ${glyph("moon")}` : ""}</span><span class="k">Sleep today</span></div>
     </div>
+    ${nextRemindersHtml(baby)}
     ${canLog() ? `
       <div class="quick">
         <button data-quick="feed"><span class="q-icon">${glyph("bottle")}</span>Feed</button>
@@ -1339,12 +1491,31 @@ function openEntryEditor(existing, presetType) {
 }
 
 /* ── Events ────────────────────────────────────────────────────────────────── */
+document.addEventListener("submit", (e) => {
+  if (e.target.id !== "reminders-form") return;
+  e.preventDefault();
+  const values = {};
+  for (const kind of REMINDER_KINDS) {
+    const raw = e.target.querySelector(`[data-reminder="${kind.id}"]`)?.value ?? "";
+    values[kind.column] = raw === "" ? null : Number(raw);
+  }
+  saveReminders(e.target.dataset.babyId, values);
+});
+
 document.addEventListener("click", (e) => {
   const t = e.target.closest("button");
   if (!t) return;
   if (t.matches('[data-testid="load-retry"]')) { refresh(); return; }
   if (t.hasAttribute("data-baby")) { currentBabyId = t.getAttribute("data-baby"); render(); return; }
-  if (t.hasAttribute("data-view")) { view = t.getAttribute("data-view"); render(); return; }
+  if (t.hasAttribute("data-view")) {
+    view = t.getAttribute("data-view");
+    render();
+    // Fetched once at load and after each save; a second fetch on every tab
+    // visit would redraw over a choice made before it answered.
+    if (view === "reminders" && !reminderStatus) loadReminderStatus();
+    return;
+  }
+  if (t.hasAttribute("data-reminders-retry")) { reminderStatusFailed = false; render(); loadReminderStatus(); return; }
   if (t.hasAttribute("data-start-shift")) { startShift(); return; }
   if (t.hasAttribute("data-end-shift")) { openShiftEditor(t.getAttribute("data-end-shift"), true); return; }
   if (t.hasAttribute("data-edit-shift")) { openShiftEditor(t.getAttribute("data-edit-shift")); return; }

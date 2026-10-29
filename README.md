@@ -26,6 +26,17 @@ caregiver can see.
   the governed read refuses a governed table inside a CTE or subquery.
 - **Shift log:** started, ended, what was done, and a handoff note the next
   person reads first, with hours per person for the week.
+- **Reminders:** manifest `interval_reminders`, sent by the hub's household
+  scheduler (the page need not be open): feed (since the last feed started),
+  wake window (since the last sleep ended; waits while one runs) and long
+  sleep (while one runs, the night included). Each child stores its own wait
+  in whole minutes (`feed_interval_min`, `wake_window_min`, `max_nap_min`,
+  migration 005); NULL is off, and every child starts off. Adults set them on
+  the Reminders tab, which suggests a value for the child's age. While a shift
+  is running the reminder goes to whoever is on shift, otherwise to the
+  adults; if nothing is logged within 30 minutes the adults are told. The tab
+  reads `api/reminders-interval-status` and says so in a shared space, where
+  the hub does not send them yet. Needs the `cron` capability.
 - **Retention:** entries and shifts auto-expire after 730 days (`retention`),
   keeping the high-volume log bounded.
 - **AI:** read-only exports `recent_entries`, `babies` and `growth`.

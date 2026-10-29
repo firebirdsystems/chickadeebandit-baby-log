@@ -6,7 +6,7 @@
   ],
   "name": "Baby Log",
   "version": "1.0.0",
-  "description": "Track feeds, diapers, naps, pumping and growth for your baby — quick one-tap logging, a running sleep timer, a daily summary every caregiver can see, growth charts with WHO percentiles, a report to take to the pediatrician, and a shift log for the nanny.",
+  "description": "Track feeds, diapers, naps, pumping and growth for your baby — quick one-tap logging, a running sleep timer, feed and wake-window reminders, a daily summary every caregiver can see, growth charts with WHO percentiles, a report to take to the pediatrician, and a shift log for the nanny.",
   "entrypoint": "index.html",
   "runtime": "static",
   "category": "family",
@@ -34,9 +34,12 @@
     "requires_approval": false
   },
   "storage": "db",
+  "required_capabilities": [
+    "cron"
+  ],
   "preload": {
     "babies": {
-      "sql": "SELECT id, name, birth_date, sex, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"
+      "sql": "SELECT id, name, birth_date, sex, emoji, archived, feed_interval_min, wake_window_min, max_nap_min, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"
     },
     "entries": {
       "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"
@@ -58,7 +61,8 @@
     "entry_type",
     "birth_date",
     "feed_kind",
-    "diaper_kind"
+    "diaper_kind",
+    "archived"
   ],
   "row_policies": {
     "babies": {
@@ -208,6 +212,63 @@
     "growth": {
       "column": "created_by",
       "on_removed": "keep"
+    }
+  },
+  "interval_reminders": {
+    "table": "entries",
+    "subject": {
+      "table": "babies",
+      "fk_column": "baby_id",
+      "label_column": "name",
+      "archived_column": "archived"
+    },
+    "kinds": [
+      {
+        "id": "feed",
+        "label": "feed",
+        "match": {
+          "entry_type": "feed"
+        },
+        "anchor_column": "started_at",
+        "interval_column": "feed_interval_min"
+      },
+      {
+        "id": "wake_window",
+        "label": "sleep",
+        "match": {
+          "entry_type": "sleep"
+        },
+        "anchor_column": "ended_at",
+        "order_column": "started_at",
+        "interval_column": "wake_window_min"
+      },
+      {
+        "id": "long_nap",
+        "label": "sleep",
+        "match": {
+          "entry_type": "sleep"
+        },
+        "anchor_column": "started_at",
+        "running_when": {
+          "ended_at": null
+        },
+        "interval_column": "max_nap_min",
+        "phrase": "running"
+      }
+    ],
+    "nudge": {
+      "audience": "adults"
+    },
+    "escalation": {
+      "grace_minutes": 30,
+      "audience": "adults"
+    },
+    "attendant": {
+      "table": "shifts",
+      "member_column": "member_id",
+      "open_when": {
+        "ended_at": ""
+      }
     }
   },
   "publishes": [
