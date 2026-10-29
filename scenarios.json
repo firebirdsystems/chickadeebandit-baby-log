@@ -761,6 +761,538 @@
           }
         }
       ]
+    },
+    {
+      "name": "growth is shared like the log: a guest nanny records a weight under their own stamped name, a parent corrects it, only an adult removes one",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest",
+        "sibling": "child"
+      },
+      "granted": [
+        "nanny"
+      ],
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__growth (id, baby_id, measured_date, weight_g, length_mm, head_mm, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "g1",
+            "b1",
+            "2026-01-05",
+            3650,
+            null,
+            null,
+            "Home scale",
+            "{{parent}}",
+            "Pat",
+            "2026-01-05T10:00:00Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, weight_g, created_by_name, note FROM app_baby_log__growth WHERE id = 'g1' AND created_by = ?",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "g1",
+                "weight_g": 3650,
+                "created_by_name": "Pat",
+                "note": "Home scale"
+              }
+            ]
+          },
+          "params": [
+            "{{nanny}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "SELECT id FROM app_baby_log__growth",
+          "expect": {
+            "status": 200,
+            "rowCount": 1
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "UPDATE app_baby_log__growth SET length_mm = ? WHERE id = ?",
+          "params": [
+            520,
+            "g1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "SELECT id, length_mm FROM app_baby_log__growth WHERE id = 'g1'",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "g1",
+                "length_mm": 520
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__growth SET created_by = ? WHERE id = ?",
+          "params": [
+            "{{parent}}",
+            "g1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "DELETE FROM app_baby_log__growth WHERE id = ?",
+          "params": [
+            "g1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "DELETE FROM app_baby_log__growth WHERE id = ?",
+          "params": [
+            "g1"
+          ],
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "DELETE FROM app_baby_log__growth WHERE id = ?",
+          "params": [
+            "g1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__growth",
+          "expect": {
+            "status": 200,
+            "rowCount": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "the report's three views run through the governed read: the summary counts each day on the household's calendar, the entry list prints the household's time, growth converts units",
+      "members": {
+        "parent": "adult"
+      },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "e1",
+            "b1",
+            "feed",
+            "2026-01-06T03:30:00.000Z",
+            "2026-01-05T22:30",
+            null,
+            120,
+            "bottle",
+            "",
+            "",
+            "{{parent}}",
+            "Alex",
+            "2026-01-06T03:30:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "e2",
+            "b1",
+            "diaper",
+            "2026-01-05T16:00:00.000Z",
+            "2026-01-05T11:00",
+            null,
+            null,
+            "",
+            "both",
+            "",
+            "{{parent}}",
+            "Alex",
+            "2026-01-05T16:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "e3",
+            "b1",
+            "sleep",
+            "2026-01-05T19:00:00.000Z",
+            "2026-01-05T14:00",
+            "2026-01-05T20:30:00.000Z",
+            null,
+            "",
+            "",
+            "",
+            "{{parent}}",
+            "Alex",
+            "2026-01-05T19:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__growth (id, baby_id, measured_date, weight_g, length_mm, head_mm, note, created_by, created_by_name, created_at) VALUES ('g1', 'b1', '2026-01-05', 3402, 508, NULL, '', ?, 'Alex', '2026-01-05T12:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__growth (id, baby_id, measured_date, weight_g, length_mm, head_mm, note, created_by, created_by_name, created_at) VALUES ('g2', 'b1', '2026-01-20', 3628, NULL, NULL, '', ?, 'Alex', '2026-01-20T12:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT b.name AS child, substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) AS day, SUM(e.entry_type = 'feed') AS feeds, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind IN ('nurse-left','nurse-right')) END AS breast, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind = 'bottle') END AS bottles, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind = 'solids') END AS solids, SUM(CASE WHEN e.entry_type = 'feed' THEN e.amount_ml END) AS fed_ml, SUM(e.entry_type = 'diaper') AS diapers, CASE WHEN SUM(e.entry_type = 'diaper') > SUM(e.diaper_kind IN ('wet','dirty','both')) THEN NULL ELSE SUM(e.diaper_kind IN ('wet','both')) END AS wet, CASE WHEN SUM(e.entry_type = 'diaper') > SUM(e.diaper_kind IN ('wet','dirty','both')) THEN NULL ELSE SUM(e.diaper_kind IN ('dirty','both')) END AS dirty, CASE WHEN SUM(CASE WHEN e.entry_type = 'sleep' AND e.ended_at > e.started_at THEN julianday(e.ended_at) - julianday(e.started_at) END) IS NULL THEN NULL ELSE printf('%.1f', SUM(CASE WHEN e.entry_type = 'sleep' AND e.ended_at > e.started_at THEN julianday(e.ended_at) - julianday(e.started_at) END) * 24) END AS sleep_hours, SUM(CASE WHEN e.entry_type = 'pump' THEN e.amount_ml END) AS pumped_ml FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN '2026-01-01' AND '2026-01-31' GROUP BY b.id, day ORDER BY b.created_at, b.id, day DESC",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "child": "Juniper",
+                "day": "2026-01-05",
+                "feeds": 1,
+                "bottles": 1,
+                "breast": 0,
+                "fed_ml": 120,
+                "diapers": 1,
+                "wet": 1,
+                "dirty": 1,
+                "sleep_hours": "1.5"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'feed' THEN 'Feed' WHEN 'diaper' THEN 'Diaper' WHEN 'sleep' THEN 'Sleep' WHEN 'pump' THEN 'Pumping' WHEN 'note' THEN 'Note' ELSE e.entry_type END AS kind, CASE e.entry_type WHEN 'feed' THEN CASE e.feed_kind WHEN 'bottle' THEN 'Bottle' WHEN 'nurse-left' THEN 'Breast, left' WHEN 'nurse-right' THEN 'Breast, right' WHEN 'solids' THEN 'Solids' ELSE e.feed_kind END WHEN 'diaper' THEN CASE e.diaper_kind WHEN 'wet' THEN 'Wet' WHEN 'dirty' THEN 'Dirty' WHEN 'both' THEN 'Wet and dirty' ELSE e.diaper_kind END ELSE '' END AS detail, e.amount_ml AS amount_ml, CASE WHEN e.ended_at > e.started_at THEN CAST(ROUND((julianday(e.ended_at) - julianday(e.started_at)) * 1440) AS INTEGER) END AS minutes, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN '2026-01-01' AND '2026-01-31' ORDER BY b.created_at, b.id, e.started_at DESC, e.id",
+          "expect": {
+            "status": 200,
+            "rowCount": 3,
+            "rowsContain": [
+              {
+                "at_time": "2026-01-05T22:30",
+                "kind": "Feed",
+                "detail": "Bottle",
+                "amount_ml": 120,
+                "who": "Alex"
+              },
+              {
+                "kind": "Sleep",
+                "minutes": 90
+              },
+              {
+                "kind": "Diaper",
+                "detail": "Wet and dirty"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT b.name AS child, g.measured_date AS measured_date, CASE WHEN g.weight_g IS NULL THEN NULL ELSE printf('%.3f', g.weight_g / 1000.0) END AS weight_kg, CASE WHEN g.weight_g IS NULL THEN NULL ELSE printf('%d lb %.1f oz', CAST(ROUND(g.weight_g / 28.349523125, 1) / 16 AS INTEGER), ROUND(g.weight_g / 28.349523125, 1) - 16 * CAST(ROUND(g.weight_g / 28.349523125, 1) / 16 AS INTEGER)) END AS weight_lb, CASE WHEN g.length_mm IS NULL THEN NULL ELSE printf('%.1f', g.length_mm / 10.0) END AS length_cm, CASE WHEN g.length_mm IS NULL THEN NULL ELSE printf('%.1f', g.length_mm / 25.4) END AS length_in, CASE WHEN g.head_mm IS NULL THEN NULL ELSE printf('%.1f', g.head_mm / 10.0) END AS head_cm, CASE WHEN g.head_mm IS NULL THEN NULL ELSE printf('%.1f', g.head_mm / 25.4) END AS head_in, g.note AS note, CASE WHEN g.created_by_name = '' THEN g.created_by ELSE g.created_by_name END AS who FROM app_baby_log__growth g JOIN app_baby_log__babies b ON b.id = g.baby_id WHERE b.archived = 0 AND g.measured_date >= '2026-01-01' AND g.measured_date <= '2026-01-31' ORDER BY b.created_at, b.id, g.measured_date DESC, g.created_at DESC",
+          "expect": {
+            "status": 200,
+            "rowCount": 2,
+            "rowsContain": [
+              {
+                "measured_date": "2026-01-05",
+                "weight_kg": "3.402",
+                "weight_lb": "7 lb 8.0 oz",
+                "length_cm": "50.8",
+                "length_in": "20.0",
+                "head_cm": null
+              },
+              {
+                "measured_date": "2026-01-20",
+                "weight_kg": "3.628",
+                "weight_lb": "8 lb 0.0 oz",
+                "length_cm": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "one running nap per child: a second start from another phone is refused, another child's nap is not, a stale stop changes nothing and the first wake-up time stands, a note saved from a form opened while it ran leaves the end alone, and once ended a new nap starts",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest"
+      },
+      "granted": [
+        "nanny"
+      ],
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b2', 'Rowan', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "n1",
+            "b1",
+            "sleep",
+            "2026-01-05T13:00:00.000Z",
+            "",
+            null,
+            null,
+            "",
+            "",
+            "",
+            "{{parent}}",
+            "Alex",
+            "2026-01-05T13:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "n2",
+            "b1",
+            "sleep",
+            "2026-01-05T13:01:00.000Z",
+            "",
+            null,
+            null,
+            "",
+            "",
+            "",
+            "{{nanny}}",
+            "Pat",
+            "2026-01-05T13:01:00.000Z"
+          ],
+          "expect": {
+            "status": 400
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "n3",
+            "b2",
+            "sleep",
+            "2026-01-05T13:01:00.000Z",
+            "",
+            null,
+            null,
+            "",
+            "",
+            "",
+            "{{nanny}}",
+            "Pat",
+            "2026-01-05T13:01:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__entries WHERE entry_type = 'sleep' AND (ended_at IS NULL OR ended_at = '')",
+          "expect": {
+            "status": 200,
+            "rowCount": 2,
+            "rowsContain": [
+              {
+                "id": "n1"
+              },
+              {
+                "id": "n3"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ? AND (ended_at IS NULL OR ended_at = '')",
+          "params": [
+            "2026-01-05T15:00:00.000Z",
+            "n1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ? AND (ended_at IS NULL OR ended_at = '')",
+          "params": [
+            "2026-01-05T15:30:00.000Z",
+            "n1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, ended_at FROM app_baby_log__entries WHERE id = 'n1'",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "n1",
+                "ended_at": "2026-01-05T15:00:00.000Z"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__entries SET note = ? WHERE id = ?",
+          "params": [
+            "Fussed first",
+            "n1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, ended_at, note FROM app_baby_log__entries WHERE id = 'n1'",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "n1",
+                "ended_at": "2026-01-05T15:00:00.000Z",
+                "note": "Fussed first"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "n4",
+            "b1",
+            "sleep",
+            "2026-01-05T17:00:00.000Z",
+            "",
+            null,
+            null,
+            "",
+            "",
+            "",
+            "{{nanny}}",
+            "Pat",
+            "2026-01-05T17:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        }
+      ]
     }
   ]
 }

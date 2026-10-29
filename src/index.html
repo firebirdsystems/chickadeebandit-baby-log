@@ -110,6 +110,9 @@
     .shift-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
     .hours { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .82rem; color: var(--muted); margin: 0 2px 8px; }
     .hours b { color: var(--text); }
+    .chart { margin-bottom: 10px; display: grid; gap: 6px; }
+    .chart-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+    .chart svg { width: 100%; height: auto; display: block; }
     .search-input {
       width: 100%; border: 1.5px solid var(--border-mid, var(--border, #d1d5db));
       border-radius: 8px; padding: 9px 11px; font: inherit;
@@ -125,18 +128,21 @@
 </div>
 
 <script type="module">
-import { esc, isAdult, hubConfirm, hubToday, searchMatch, glyph } from "/hub-sdk.js";
+import { esc, isAdult, hubConfirm, hubToday, hubTimeZone, searchMatch, glyph } from "/hub-sdk.js";
 import {
-  ENTRY_TYPES, typeMeta, fmtDuration, timeAgo, dayKey, groupByDay,
+  ENTRY_TYPES, typeMeta, runningSleepClash, changedFields, fmtDuration, timeAgo, dayKey, groupByDay,
   summarizeDay, runningSleep, ageLabel, entryDetail, feedKindLabel, diaperKindLabel, searchableFields, failureLine,
   unchangedWriteLine, outcomeUnknown, storedDiffers, SAVED_AS_FIRST,
   sortShifts, runningShift, canEditShift, shiftLength, shiftTimesError, latestHandoff, hoursByMember,
+  localStamp, defaultUnits, gramsFrom, mmFrom, lbOz, fmtWeight, fmtLength, lengthValue, growthError, sortGrowth,
+  growthSeries, chartPoints, ageInDays, whoPercentile, percentileLabel, percentileChart, WHO_MEASURES, defaultRecordRange, recordRangeError, recordUrl,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
 const DB = window.__DB_URL ?? "";
 const HUB_MEMBER = window.__CURRENT_MEMBER ?? null;
 const EVENTS = window.__EVENTS_URL ?? "";
+const REPORTS_URL = window.__REPORTS_URL ?? "";
 
 // Note the payload: entry_type and amounts only, never `note`. The free-text
 // note is the one field a parent may have written something private into.
@@ -159,7 +165,8 @@ let me = null;
 let babies = [];
 let entries = [];
 let shifts = [];
-let view = "log";       // "log" | "shifts"
+let growth = [];
+let view = "log";       // "log" | "growth" | "report" | "shifts"
 let currentBabyId = null;
 let searchQ = "";       // in-app search (see logic.js searchableFields)
 let error = "";
@@ -168,6 +175,11 @@ let modalEl = null;
 let tickTimer = null;
 
 function nowIso() { return new Date().toISOString(); }
+const ENTRY_COLS = "id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at";
+const SLEEP_RUNNING = "A nap is already running for this child. End that one first.";
+// When an entry started on the household's clock, written beside the UTC
+// instant for the doctor-visit report (migration 004).
+function householdStamp(iso) { return localStamp(iso, hubTimeZone()); }
 // Adults manage the children and remove entries. Everyone with the app logs:
 // the hub stamps each entry and shift with whoever wrote it, a nanny or
 // sitter signed in as a guest included (manifest row_policies).
@@ -230,10 +242,10 @@ async function loadMembers() {
 
 async function loadBabies() {
   if (!DB) {
-    babies = [{ id: "demo-baby", name: "Willow", birth_date: "2026-04-20", emoji: "👶", archived: 0, created_by: "demo-1", created_at: nowIso() }];
+    babies = [{ id: "demo-baby", name: "Willow", birth_date: "2026-04-20", sex: "female", emoji: "👶", archived: 0, created_by: "demo-1", created_at: nowIso() }];
     return;
   }
-  const res = await db("SELECT id, name, birth_date, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at");
+  const res = await db("SELECT id, name, birth_date, sex, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at");
   babies = res.rows ?? [];
 }
 
@@ -248,10 +260,16 @@ async function loadEntries() {
     return;
   }
   // Bounded: the timeline shows the recent log; retain_days prunes the rest.
-  const res = await db(
-    "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400",
-  );
-  entries = res.rows ?? [];
+  // Every running nap is read as well, however old: one left running past
+  // the newest 400 entries would otherwise be invisible, and the database
+  // (one running nap per child, migration 004) would refuse every new start.
+  const [res, running] = await Promise.all([
+    db("SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"),
+    db("SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries WHERE entry_type = 'sleep' AND (ended_at IS NULL OR ended_at = '')"),
+  ]);
+  const recent = res.rows ?? [];
+  const seen = new Set(recent.map((e) => e.id));
+  entries = [...recent, ...(running.rows ?? []).filter((e) => !seen.has(e.id))];
 }
 
 // Recent shifts and every one still running, however long ago it started, so
@@ -269,10 +287,28 @@ async function loadShifts() {
   shifts = sortShifts(res.rows ?? []);
 }
 
+// Every measurement, not a recent window: a growth curve needs the first one.
+// Bounded only so a runaway table cannot stall the page.
+const GROWTH_COLS = "id, baby_id, measured_date, weight_g, length_mm, head_mm, note, created_by, created_by_name, created_at";
+async function loadGrowth() {
+  if (!DB) {
+    growth = [
+      { id: "g1", baby_id: "demo-baby", measured_date: "2026-04-20", weight_g: 3400, length_mm: 500, head_mm: 345, note: "Birth", created_by: "demo-1", created_by_name: "Alex", created_at: nowIso() },
+      { id: "g2", baby_id: "demo-baby", measured_date: "2026-05-04", weight_g: 3650, length_mm: 515, head_mm: 355, note: "Two-week check-up", created_by: "demo-1", created_by_name: "Alex", created_at: nowIso() },
+      { id: "g3", baby_id: "demo-baby", measured_date: "2026-06-20", weight_g: 5100, length_mm: 565, head_mm: 385, note: "", created_by: "demo-2", created_by_name: "Jordan", created_at: nowIso() },
+    ];
+    growth = sortGrowth(growth);
+    return;
+  }
+  // Written out in full: manifest.preload matches this text (preload.test.mjs).
+  const res = await db("SELECT id, baby_id, measured_date, weight_g, length_mm, head_mm, note, created_by, created_by_name, created_at FROM app_baby_log__growth ORDER BY measured_date DESC, created_at DESC LIMIT 500");
+  growth = sortGrowth(res.rows ?? []);
+}
+
 async function refresh() {
   error = "";
   try {
-    await Promise.all([loadMembers(), loadBabies(), loadEntries(), loadShifts()]);
+    await Promise.all([loadMembers(), loadBabies(), loadEntries(), loadShifts(), loadGrowth()]);
     if (!currentBabyId || !babies.some((b) => b.id === currentBabyId)) currentBabyId = babies[0]?.id ?? null;
     loadFailed = false;
     render();
@@ -321,15 +357,15 @@ async function addBaby(fields, form) {
   // try whose answer was lost may have stored the child, and a second press
   // must find that row rather than add another.
   const id = form ? (form.dataset.rowId ??= crypto.randomUUID()) : crypto.randomUUID();
-  let row = { id, name: fields.name, birth_date: fields.birth_date, emoji: "👶", archived: 0, created_by: me.id, created_at: nowIso() };
+  let row = { id, name: fields.name, birth_date: fields.birth_date, sex: fields.sex, emoji: "👶", archived: 0, created_by: me.id, created_at: nowIso() };
   let note = "";
   // The form stays open until the hub has the child: nothing is drawn for a
   // row the hub never got.
   try {
-    await db("INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES (?,?,?,?,0,?,?)",
-      [row.id, row.name, row.birth_date, row.emoji, row.created_by, row.created_at]);
+    await db("INSERT INTO app_baby_log__babies (id, name, birth_date, sex, emoji, archived, created_by, created_at) VALUES (?,?,?,?,?,0,?,?)",
+      [row.id, row.name, row.birth_date, row.sex, row.emoji, row.created_by, row.created_at]);
   } catch (e) {
-    const stored = await landedUnheard(e, "app_baby_log__babies", "id, name, birth_date, emoji, archived, created_by, created_at", id);
+    const stored = await landedUnheard(e, "app_baby_log__babies", "id, name, birth_date, sex, emoji, archived, created_by, created_at", id);
     // The id is ours: with the read-back failed (undefined), a UNIQUE answer may be
     // this form's own first try, so nothing is known — "try again", not "already exists".
     if (!stored) { const words = { action: "add the child", thing: "child" }; saveFailed(e, words, failureLine(stored === undefined ? null : e, words)); return; }
@@ -367,18 +403,44 @@ async function archiveBaby(id) {
   }
 }
 
-async function saveEntry(fields, existingId, pinHost = null) {
+// Girl or boy, for the growth tab's WHO percentiles. Adults only, as every
+// other change to a child is (the babies row policy).
+async function setBabySex(id, sex) {
+  const prev = babies;
+  babies = babies.map((b) => (b.id === id ? { ...b, sex } : b));
+  render();
+  const words = { action: "save the child", thing: "child" };
+  let res;
+  try { res = await db("UPDATE app_baby_log__babies SET sex = ? WHERE id = ?", [sex, id]); }
+  catch (e) { console.error(e); babies = prev; showError(failureLine(e, words)); return; }
+  if (changedNothing(res)) {
+    const gone = await rowGone("app_baby_log__babies", id);
+    babies = gone === true ? prev.filter((b) => b.id !== id) : prev;
+    showError(unchangedWriteLine(gone, words));
+  }
+}
+
+async function saveEntry(fields, existingId, pinHost = null, opened = null) {
   const now = nowIso();
   if (existingId) {
     const words = { action: "save the entry", thing: "entry" };
+    // Only what this form changed is written. Two people may have the same
+    // entry open: a parent ends a nap while the nanny adds a note to it, and
+    // the nanny's save must not write back the empty end her form opened with.
+    const set = changedFields(opened, fields);
+    if ("started_at" in set) set.local_at = householdStamp(set.started_at);
+    const cols = Object.keys(set);
+    if (!cols.length) { error = ""; closeModal(); render(); return; }
     // The form stays open until the hub has the edit (see saveFailed).
     let res;
     try {
-      res = await db(
-        "UPDATE app_baby_log__entries SET entry_type=?, started_at=?, ended_at=?, amount_ml=?, feed_kind=?, diaper_kind=?, note=? WHERE id=?",
-        [fields.entry_type, fields.started_at, fields.ended_at, fields.amount_ml, fields.feed_kind, fields.diaper_kind, fields.note, existingId],
-      );
-    } catch (e) { saveFailed(e, words); return; }
+      res = await db(`UPDATE app_baby_log__entries SET ${cols.map((c) => `${c} = ?`).join(", ")} WHERE id = ?`, [...cols.map((c) => set[c]), existingId]);
+    } catch (e) {
+      // Emptying a nap's end while another nap runs for the child.
+      if (runningSleepClash(e, fields)) { console.error(e); saveFailed(null, words, SLEEP_RUNNING); return; }
+      saveFailed(e, words);
+      return;
+    }
     // No row took the edit: the form stays as typed and says why. A row that
     // is gone leaves the list behind it too.
     if (changedNothing(res)) {
@@ -387,8 +449,12 @@ async function saveEntry(fields, existingId, pinHost = null) {
       saveFailed(null, words, unchangedWriteLine(gone, words));
       return;
     }
-    const idx = entries.findIndex((e) => e.id === existingId);
-    if (idx !== -1) entries[idx] = { ...entries[idx], ...fields };
+    // Read back: the row holds this edit and whatever someone else changed
+    // meanwhile (an end another caregiver set), and the list shows that.
+    let stored = null;
+    try { stored = (await db(`SELECT ${ENTRY_COLS} FROM app_baby_log__entries WHERE id = ?`, [existingId])).rows?.[0] ?? null; }
+    catch (readErr) { console.error(readErr); }
+    entries = entries.map((x) => (x.id === existingId ? (stored ?? { ...x, ...set }) : x));
     error = "";
     closeModal();
     render();
@@ -401,11 +467,22 @@ async function saveEntry(fields, existingId, pinHost = null) {
     let note = "";
     try {
       await db(
-        "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        [row.id, row.baby_id, row.entry_type, row.started_at, row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_by_name, row.created_at],
+        "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [row.id, row.baby_id, row.entry_type, row.started_at, householdStamp(row.started_at), row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_by_name, row.created_at],
       );
     } catch (e) {
       const stored = await landedUnheard(e, "app_baby_log__entries", "id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at", id);
+      // Not ours, and UNIQUE on a running nap: someone else started one for
+      // this child first (one running nap per child, migration 004). Nothing
+      // was stored; the log is read again so it shows the nap that is running.
+      if (stored === null && runningSleepClash(e, fields)) {
+        console.error(e);
+        if (pinHost) delete pinHost.rowId;
+        try { await loadEntries(); } catch (readErr) { console.error(readErr); }
+        render();
+        saveFailed(null, { action: "save the entry", thing: "entry" }, SLEEP_RUNNING);
+        return;
+      }
       if (!stored) {
         // A refusal the hub named stored nothing: the next try may mint afresh.
         if (pinHost && !outcomeUnknown(e)) delete pinHost.rowId;
@@ -474,12 +551,22 @@ async function toggleSleep() {
     entries = entries.map((e) => (e.id === running.id ? { ...running, ended_at: endedAt } : e));
     render();
     let res;
-    try { res = await db("UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ?", [endedAt, running.id]); }
+    // Only a nap that is still running: a page that has not seen another
+    // caregiver end it must not move the wake-up time they recorded.
+    try { res = await db("UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ? AND (ended_at IS NULL OR ended_at = '')", [endedAt, running.id]); }
     catch (e) { console.error(e); entries = prev; showError(failureLine(e, words)); return; }
     if (changedNothing(res)) {
-      const gone = await rowGone("app_baby_log__entries", running.id);
-      entries = gone === true ? prev.filter((e) => e.id !== running.id) : prev;
-      showError(unchangedWriteLine(gone, words));
+      let stored;
+      try { stored = (await db(`SELECT ${ENTRY_COLS} FROM app_baby_log__entries WHERE id = ?`, [running.id])).rows?.[0] ?? null; }
+      catch (e) { console.error(e); entries = prev; showError(failureLine(null, words)); return; }
+      // Ended already, here or elsewhere: the time it was ended at stands.
+      if (stored?.ended_at) {
+        entries = prev.map((e) => (e.id === stored.id ? stored : e));
+        showError("This nap had already been ended. The log shows when.");
+        return;
+      }
+      entries = stored ? prev : prev.filter((e) => e.id !== running.id);
+      showError(unchangedWriteLine(stored ? false : true, words));
     }
   } else {
     if (!pin) sleepPins.set(babyId, (pin = { started_at: nowIso() }));
@@ -726,12 +813,273 @@ function renderShifts() {
   `;
 }
 
+/* ── Growth ────────────────────────────────────────────────────────────────── */
+// Weight, length and head size. Stored in grams and millimetres; shown in the
+// units this viewer picks, remembered on this device only.
+const UNITS_KEY = "baby-log-units";
+let units = (() => {
+  try { const saved = localStorage.getItem(UNITS_KEY); if (saved === "metric" || saved === "imperial") return saved; } catch { /* storage blocked */ }
+  return defaultUnits(navigator.language);
+})();
+function setUnits(next) {
+  units = next;
+  try { localStorage.setItem(UNITS_KEY, next); } catch { /* storage blocked: kept for this visit */ }
+  render();
+}
+
+async function saveGrowth(fields, existingId, form) {
+  const words = { action: "save the measurement", thing: "measurement" };
+  if (existingId) {
+    let res;
+    try {
+      res = await db("UPDATE app_baby_log__growth SET measured_date=?, weight_g=?, length_mm=?, head_mm=?, note=? WHERE id=?",
+        [fields.measured_date, fields.weight_g, fields.length_mm, fields.head_mm, fields.note, existingId]);
+    } catch (e) { saveFailed(e, words); return; }
+    if (changedNothing(res)) {
+      const gone = await rowGone("app_baby_log__growth", existingId);
+      if (gone === true) { growth = growth.filter((x) => x.id !== existingId); render(); }
+      saveFailed(null, words, unchangedWriteLine(gone, words));
+      return;
+    }
+    growth = sortGrowth(growth.map((g) => (g.id === existingId ? { ...g, ...fields } : g)));
+  } else {
+    // Pinned on the form and sent on every retry, as entries are.
+    const id = (form.dataset.rowId ??= crypto.randomUUID());
+    let row = { id, baby_id: currentBabyId, ...fields, created_by: me.id, created_by_name: me.name ?? "", created_at: nowIso() };
+    let note = "";
+    try {
+      await db(`INSERT INTO app_baby_log__growth (${GROWTH_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [row.id, row.baby_id, row.measured_date, row.weight_g, row.length_mm, row.head_mm, row.note, row.created_by, row.created_by_name, row.created_at]);
+    } catch (e) {
+      const stored = await landedUnheard(e, "app_baby_log__growth", GROWTH_COLS, id);
+      if (!stored) {
+        if (!outcomeUnknown(e)) delete form.dataset.rowId;
+        saveFailed(e, words, failureLine(stored === undefined ? null : e, words));
+        return;
+      }
+      console.error(e);
+      if (storedDiffers(stored, fields)) note = SAVED_AS_FIRST;
+      row = stored;
+    }
+    delete form.dataset.rowId;
+    growth = sortGrowth([row, ...growth.filter((x) => x.id !== row.id)]);
+    error = note;
+    closeModal();
+    render();
+    return;
+  }
+  error = "";
+  closeModal();
+  render();
+}
+
+async function deleteGrowth(id) {
+  const ok = await hubConfirm({ message: "Delete this measurement?", confirmLabel: "Delete", destructive: true });
+  if (!ok) return;
+  const prev = growth;
+  growth = growth.filter((g) => g.id !== id);
+  closeModal();
+  render();
+  const words = { action: "delete the measurement", thing: "measurement" };
+  let res;
+  try { res = await db("DELETE FROM app_baby_log__growth WHERE id = ?", [id]); }
+  catch (e) { console.error(e); growth = prev; showError(failureLine(e, words)); return; }
+  if (changedNothing(res)) {
+    const gone = await rowGone("app_baby_log__growth", id);
+    if (gone !== true) growth = prev;
+    showError(unchangedWriteLine(gone, words));
+  }
+}
+
+function openGrowthEditor(existing) {
+  const g = existing ?? null;
+  const imperial = units === "imperial";
+  const w = g?.weight_g != null ? lbOz(g.weight_g) : null;
+  const lengthUnit = imperial ? "in" : "cm";
+  openModal(`
+    <h2>${g ? "Edit measurement" : "Add a measurement"}</h2>
+    <form class="form" id="growth-form">
+      <div class="field"><label for="g-date">Measured on</label><input id="g-date" type="date" max="${esc(hubToday())}" value="${esc(g?.measured_date ?? hubToday())}" required /></div>
+      ${imperial ? `
+      <div class="grid2">
+        <div class="field"><label for="g-lb">Weight (lb)</label><input id="g-lb" type="number" min="0" step="1" inputmode="numeric" data-autofocus value="${w ? esc(w.lb) : ""}" /></div>
+        <div class="field"><label for="g-oz">and oz</label><input id="g-oz" type="number" min="0" max="15.9" step="0.1" inputmode="decimal" value="${w ? esc(w.oz) : ""}" /></div>
+      </div>` : `
+      <div class="field"><label for="g-kg">Weight (kg)</label><input id="g-kg" type="number" min="0" step="0.001" inputmode="decimal" data-autofocus value="${g?.weight_g != null ? esc(g.weight_g / 1000) : ""}" /></div>`}
+      <div class="grid2">
+        <div class="field"><label for="g-length">Length (${lengthUnit})</label><input id="g-length" type="number" min="0" step="0.1" inputmode="decimal" value="${esc(lengthValue(g?.length_mm, units))}" /></div>
+        <div class="field"><label for="g-head">Head (${lengthUnit})</label><input id="g-head" type="number" min="0" step="0.1" inputmode="decimal" value="${esc(lengthValue(g?.head_mm, units))}" /></div>
+      </div>
+      <p class="muted tiny">Fill in what was measured; the rest can stay empty.</p>
+      <div class="field"><label for="g-note">Note <span class="muted" style="text-transform:none">(optional)</span></label><textarea id="g-note" placeholder="Home scale, or the check-up it was taken at">${esc(g?.note ?? "")}</textarea></div>
+      <div class="error" data-form-error data-testid="modal-error" role="alert" hidden></div>
+      <div class="modal-actions">
+        ${g && canManage() ? `<button type="button" class="btn btn-danger modal-left" data-delete-growth="${esc(g.id)}">Delete</button>` : ""}
+        <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
+        <button type="submit" class="btn">${g ? "Save" : "Add"}</button>
+      </div>
+    </form>`);
+  modalEl.querySelector("[data-autofocus]")?.focus();
+  const opened = Object.fromEntries(["g-lb", "g-oz", "g-kg", "g-length", "g-head"].map((id) => [id, document.getElementById(id)?.value ?? ""]));
+  modalEl.querySelector("#growth-form").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const val = (id) => document.getElementById(id)?.value ?? "";
+    // A measure whose fields still hold what the form opened with keeps its
+    // stored value: the form shows it rounded (0.1 oz, 0.1 in), and converting
+    // that back would move a number nobody changed.
+    const untouched = (...ids) => !!g && ids.every((id) => val(id) === (opened[id] ?? ""));
+    const fields = {
+      measured_date: val("g-date"),
+      weight_g: untouched("g-lb", "g-oz", "g-kg") ? g.weight_g : gramsFrom({ units, lb: val("g-lb"), oz: val("g-oz"), kg: val("g-kg") }),
+      length_mm: untouched("g-length") ? g.length_mm : mmFrom(val("g-length"), units),
+      head_mm: untouched("g-head") ? g.head_mm : mmFrom(val("g-head"), units),
+      note: val("g-note").trim(),
+    };
+    const line = ev.currentTarget.querySelector("[data-form-error]");
+    const problem = growthError(fields, hubToday());
+    if (problem) { line.textContent = problem; line.hidden = false; return; }
+    line.hidden = true;
+    const btn = modalEl?.querySelector('button[type="submit"]');
+    if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Saving…"; }
+    saveGrowth(fields, g?.id ?? null, ev.currentTarget).catch((err) => saveFailed(err, { action: "save the measurement", thing: "measurement" }));
+  });
+}
+
+function fmtDay(date) {
+  const d = new Date(`${date}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? String(date ?? "") : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(d);
+}
+
+// One measure over time. With the child's sex and birth date, and every
+// measurement inside birth to 24 months, it is drawn by age over the WHO
+// percentile lines; otherwise by date on its own.
+function growthChartHtml(baby, rows, key, title, fmt) {
+  const series = growthSeries(rows, key);
+  if (!series.length) return "";
+  const W = 320, H = 130;
+  const first = series[0], last = series.at(-1);
+  const pct = whoPercentile(key, last.value, baby.sex, baby.birth_date, last.date);
+  const byAge = baby.sex
+    ? percentileChart(series.map((p) => ({ ...p, days: ageInDays(baby.birth_date, p.date) })), key, baby.sex, W, H, 10)
+    : null;
+  const dots = byAge ? byAge.dots : chartPoints(series, W, H, 10);
+  const bands = byAge ? byAge.lines.map((l) => `
+        <polyline fill="none" stroke="${l.z === 0 ? "var(--muted)" : "var(--border-mid)"}" stroke-width="${l.z === 0 ? 1.2 : 0.8}" points="${l.points.map((q) => `${q.x},${q.y}`).join(" ")}" />
+        ${l.label === "2nd" || l.label === "50th" || l.label === "98th" ? `<text x="${W - 2}" y="${l.points.at(-1).y - 2}" text-anchor="end" font-size="8" fill="var(--muted)">${l.label}</text>` : ""}`).join("") : "";
+  return `
+    <div class="card chart" data-testid="growth-chart" data-measure="${esc(key)}">
+      <div class="chart-head"><strong>${esc(title)}</strong><span class="muted tiny">${series.length > 1 ? `${esc(fmt(first.value))} on ${esc(fmtDay(first.date))} → ` : ""}${esc(fmt(last.value))} on ${esc(fmtDay(last.date))}${pct != null ? ` · <span data-testid="latest-percentile">${esc(percentileLabel(pct))} percentile</span>` : ""}</span></div>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)} over ${byAge ? "age, with the WHO percentile lines" : "time"}">
+        ${bands}
+        ${dots.length > 1 ? `<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="${dots.map((q) => `${q.x},${q.y}`).join(" ")}" />` : ""}
+        ${dots.map((q) => `<circle cx="${q.x}" cy="${q.y}" r="3.5" fill="var(--accent)"><title>${esc(fmtDay(q.date))}: ${esc(fmt(q.value))}</title></circle>`).join("")}
+      </svg>
+    </div>`;
+}
+
+function renderGrowth(baby) {
+  const rows = growth.filter((g) => g.baby_id === baby.id);
+  const weight = (v) => fmtWeight(v, units), length = (v) => fmtLength(v, units);
+  const pct = (g, key) => whoPercentile(key, g[key], baby.sex, baby.birth_date, g.measured_date);
+  const withPct = (text, p) => (p == null ? text : `${text} (${percentileLabel(p)})`);
+  const anyPct = rows.some((g) => Object.keys(WHO_MEASURES).some((k) => pct(g, k) != null));
+  return `
+    <div class="section-head">
+      <h2>Growth</h2>
+      <div class="tabs" style="margin:0">
+        <button class="tab ${units === "imperial" ? "active" : ""}" data-units="imperial">lb · in</button>
+        <button class="tab ${units === "metric" ? "active" : ""}" data-units="metric">kg · cm</button>
+        ${canLog() ? `<button class="btn btn-sm" data-add-growth>+ Measurement</button>` : ""}
+      </div>
+    </div>
+    ${!baby.sex && canManage() ? `
+      <div class="card stack" data-testid="growth-sex-prompt" style="margin-bottom:10px">
+        <div class="tiny">To compare ${esc(baby.name)}'s growth with the WHO growth standards, which differ for girls and boys, choose one.</div>
+        <div class="tabs" style="margin:0"><button class="tab" data-set-sex="female" data-baby-id="${esc(baby.id)}">Girl</button><button class="tab" data-set-sex="male" data-baby-id="${esc(baby.id)}">Boy</button></div>
+      </div>` : ""}
+    ${rows.length ? `
+      ${growthChartHtml(baby, rows, "weight_g", "Weight", weight)}
+      ${growthChartHtml(baby, rows, "length_mm", "Length", length)}
+      ${growthChartHtml(baby, rows, "head_mm", "Head size", length)}
+      ${anyPct ? `<p class="muted tiny" data-testid="who-credit">Percentiles, in brackets, are from the WHO Child Growth Standards (World Health Organization, 2006), birth to 24 months, by actual age (not corrected for early birth), using data files the CDC National Center for Health Statistics publishes free of charge at cdc.gov/growthcharts. Not endorsed by CDC, HHS or WHO. For information only, not medical advice: your pediatrician reads them with you.</p>` : ""}
+      <div class="stack" style="margin-top:12px">${rows.map((g) => `
+        <div class="entry" data-testid="growth-row">
+          <div class="entry-body">
+            <div class="entry-title">${esc(fmtDay(g.measured_date))}</div>
+            <div class="entry-meta">${esc([g.weight_g != null ? withPct(weight(g.weight_g), pct(g, "weight_g")) : "", g.length_mm != null ? withPct(`${length(g.length_mm)} long`, pct(g, "length_mm")) : "", g.head_mm != null ? withPct(`head ${length(g.head_mm)}`, pct(g, "head_mm")) : ""].filter(Boolean).join(" · "))}</div>
+            ${g.note ? `<div class="entry-meta">${esc(g.note)}</div>` : ""}
+            <div class="entry-meta">${esc(rowName(g.created_by_name, g.created_by))}</div>
+          </div>
+          <div class="entry-side">${canLog() ? `<button class="edit-link" data-edit-growth="${esc(g.id)}">Edit</button>` : ""}</div>
+        </div>`).join("")}</div>`
+    : `<div class="card empty">No measurements yet.${canLog() ? " Add the birth weight, or the numbers from the last check-up." : ""}</div>`}
+  `;
+}
+
+/* ── The doctor-visit report ───────────────────────────────────────────────── */
+// The hub renders these documents from the manifest's `reports`, as whoever
+// asks, through the same row policies as the page's own reads; the full record
+// binds them for one date range. Adults only: the hub refuses a guest, and
+// taking the baby to the doctor is a parent's errand.
+const records = { views: null, full: null, loading: false, failed: false };
+let recordFrom = "", recordTo = "";
+// Until someone picks a date the range is the default, which ends "today", so
+// it is worked out each time it is used.
+let recordRangeEdited = false;
+function canReport() { return !!REPORTS_URL && canManage(); }
+function loadRecords() {
+  if (!REPORTS_URL || records.views || records.loading) return;
+  records.loading = true; records.failed = false;
+  fetch(REPORTS_URL, { headers: { Accept: "application/json" } })
+    .then((res) => { if (!res.ok) throw new Error(`reports ${res.status}`); return res.json(); })
+    .then((body) => { records.views = Array.isArray(body?.views) ? body.views : []; records.full = body?.full_record ?? null; })
+    // A list that failed to load is not an empty list.
+    .catch(() => { records.failed = true; })
+    .finally(() => { records.loading = false; if (view === "report") render(); });
+}
+function openRecord(id, format) {
+  if (!recordRangeEdited) ({ from: recordFrom, to: recordTo } = defaultRecordRange(hubToday()));
+  const problem = recordRangeError(recordFrom, recordTo);
+  if (problem) { showError(problem); return; }
+  if (error) { error = ""; render(); }
+  window.open(recordUrl(REPORTS_URL, id, format, recordFrom, recordTo, window.location.href), "_blank", "noopener");
+}
+function renderReport() {
+  if (!records.views) {
+    if (records.failed) return `<div class="card empty" data-testid="record-card">The report could not be loaded. <button class="btn btn-ghost btn-sm" data-records-retry>Try again</button></div>`;
+    loadRecords();
+    return `<div class="card empty" data-testid="record-card">Loading…</div>`;
+  }
+  if (!recordRangeEdited) ({ from: recordFrom, to: recordTo } = defaultRecordRange(hubToday()));
+  // The hub lists "pdf" only when it can render one.
+  const fullPdf = Array.isArray(records.full?.formats) && records.full.formats.includes("pdf");
+  const button = (id, format, label, primary) => `<button class="btn btn-sm ${primary ? "" : "btn-ghost"}" data-report="${esc(id)}" data-format="${format}">${label}</button>`;
+  return `
+    <div class="section-head"><h2>For the pediatrician</h2></div>
+    <div class="card stack" data-testid="record-card">
+      <div>One document with a daily summary of feeds, diapers and sleep, every entry, and the growth measurements, for every child and the dates below. Open it and print it${fullPdf ? ", or download it as a PDF" : ", or save it as a PDF from the print dialog"}.</div>
+      <div class="grid2">
+        <div class="field"><label for="rec-from">From</label><input id="rec-from" type="date" value="${esc(recordFrom)}"></div>
+        <div class="field"><label for="rec-to">To</label><input id="rec-to" type="date" value="${esc(recordTo)}"></div>
+      </div>
+      <p class="muted tiny">Leave From empty to start at the beginning. Days and times are the household's own.</p>
+      ${records.full ? `<div class="modal-actions" style="justify-content:flex-start">${button(records.full.id, "html", "Open the report", true)}${fullPdf ? button(records.full.id, "pdf", "Download PDF") : ""}</div>` : ""}
+      ${records.views.length ? `<div class="stack">${records.views.map((v) => `
+        <div class="entry" data-testid="record-view" data-record="${esc(v.id)}">
+          <div class="entry-body"><div class="entry-title">${esc(v.title)}</div>${v.description ? `<div class="entry-meta">${esc(v.description)}</div>` : ""}</div>
+          <div class="entry-side" style="grid-auto-flow:column">${button(v.id, "html", "Open")}${button(v.id, "csv", "CSV")}</div>
+        </div>`).join("")}</div>` : ""}
+    </div>`;
+}
+
 /* ── Rendering ─────────────────────────────────────────────────────────────── */
 function viewTabsHtml() {
   return `
       <div class="tabs" style="margin:0">
         <button class="tab ${view === "log" ? "active" : ""}" data-view="log">Log</button>
+        <button class="tab ${view === "growth" ? "active" : ""}" data-view="growth">Growth</button>
         <button class="tab ${view === "shifts" ? "active" : ""}" data-view="shifts">Shifts</button>
+        ${canReport() ? `<button class="tab ${view === "report" ? "active" : ""}" data-view="report">Report</button>` : ""}
         ${canManage() ? `<button class="btn btn-ghost btn-sm" data-add-baby>+ Child</button>` : ""}
       </div>`;
 }
@@ -763,6 +1111,13 @@ function renderEntry(e) {
       </div>
     </div>`;
 }
+
+// The report's dates: kept as typed, and from then on no longer the default.
+document.addEventListener("change", (e) => {
+  if (e.target.id !== "rec-from" && e.target.id !== "rec-to") return;
+  if (e.target.id === "rec-from") recordFrom = e.target.value; else recordTo = e.target.value;
+  recordRangeEdited = true;
+});
 
 // render() rewrites the whole view, so put the caret back after typing.
 document.addEventListener("input", (e) => {
@@ -811,6 +1166,7 @@ function render() {
     : babyEntries;
   const groups = groupByDay(shownEntries);
   const age = ageLabel(baby.birth_date);
+  const babyTabs = babies.length > 1 ? `<div class="tabs">${babies.map((b) => `<button class="tab ${b.id === baby.id ? "active" : ""}" data-baby="${esc(b.id)}">${esc(b.emoji)} ${esc(b.name)}</button>`).join("")}</div>` : "";
 
   root.innerHTML = `
     <div class="topbar">
@@ -821,8 +1177,8 @@ function render() {
       ${viewTabsHtml()}
     </div>
     ${error ? `<div class="error">${esc(error)}</div>` : ""}
-    ${view === "shifts" ? renderShifts() : `
-    ${babies.length > 1 ? `<div class="tabs">${babies.map((b) => `<button class="tab ${b.id === baby.id ? "active" : ""}" data-baby="${esc(b.id)}">${esc(b.emoji)} ${esc(b.name)}</button>`).join("")}</div>` : ""}
+    ${view === "growth" || view === "log" ? babyTabs : ""}
+    ${view === "shifts" ? renderShifts() : view === "report" && canReport() ? renderReport() : view === "growth" ? renderGrowth(baby) : `
     <div class="summary">
       <div class="stat"><span class="v">${today.feedCount}</span><span class="k">Feeds today</span></div>
       <div class="stat"><span class="v">${today.lastFeedAt ? esc(timeAgo(today.lastFeedAt)) : "—"}</span><span class="k">Last feed</span></div>
@@ -846,9 +1202,11 @@ function render() {
     `}
   `;
 
-  // Keep the running-sleep total ticking without a full data reload.
+  // Keep the running-sleep total ticking without a full data reload. On the
+  // log only: a render rebuilds the whole view, and on another tab it would
+  // throw away a date or a number being typed.
   clearInterval(tickTimer);
-  if (sleeping) tickTimer = setInterval(render, 60000);
+  if (sleeping && view === "log") tickTimer = setInterval(render, 60000);
 }
 
 /* ── Modals ────────────────────────────────────────────────────────────────── */
@@ -875,6 +1233,10 @@ function openBabyEditor() {
     <form class="form" id="baby-form">
       <div class="field"><label for="b-name">Name</label><input id="b-name" data-autofocus required /></div>
       <div class="field"><label for="b-dob">Birth date</label><input id="b-dob" type="date" required /></div>
+      <div class="field"><label for="b-sex">Sex</label>
+        <select id="b-sex"><option value="">Not set</option><option value="female">Girl</option><option value="male">Boy</option></select>
+      </div>
+      <p class="muted tiny">The growth tab compares weight, length and head size with the WHO growth standards, which differ for girls and boys.</p>
       <div class="error" data-form-error data-testid="modal-error" role="alert" hidden></div>
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
@@ -891,7 +1253,7 @@ function openBabyEditor() {
     line.hidden = true;
     const btn = modalEl?.querySelector('button[type="submit"]');
     if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Adding…"; }
-    addBaby({ name, birth_date: dob }, e.currentTarget).catch((err) => saveFailed(err, { action: "add the child", thing: "child" }));
+    addBaby({ name, birth_date: dob, sex: document.getElementById("b-sex").value }, e.currentTarget).catch((err) => saveFailed(err, { action: "add the child", thing: "child" }));
   });
 }
 
@@ -938,6 +1300,11 @@ function openEntryEditor(existing, presetType) {
   applyVisibility();
   modalEl.querySelector("#f-type").addEventListener("change", applyVisibility);
 
+  // The times as the form opened with them. The inputs hold minutes only, so
+  // a time left alone keeps the stored one rather than being rewritten from
+  // the rounded copy (see saveEntry: only what changed is written).
+  const openedStart = document.getElementById("f-start").value;
+  const openedEnd = document.getElementById("f-end")?.value ?? "";
   modalEl.querySelector("#entry-form").addEventListener("submit", (ev) => {
     ev.preventDefault();
     const entryType = document.getElementById("f-type").value;
@@ -953,8 +1320,8 @@ function openEntryEditor(existing, presetType) {
     const end = showsEnd && endRaw ? new Date(endRaw) : null;
     // toISOString throws on a date it could not parse.
     if (Number.isNaN(start.getTime()) || (end && Number.isNaN(end.getTime()))) { line.textContent = "Enter a valid date and time."; line.hidden = false; return; }
-    const startedAt = start.toISOString();
-    const endedAt = end ? end.toISOString() : null;
+    const startedAt = e && startRaw === openedStart ? e.started_at : start.toISOString();
+    const endedAt = e && showsEnd && e.entry_type === entryType && endRaw === openedEnd ? (e.ended_at || null) : (end ? end.toISOString() : null);
     if (endedAt && endedAt < startedAt) { line.textContent = "End time is before start time."; line.hidden = false; return; }
     line.hidden = true;
     const btn = modalEl?.querySelector('button[type="submit"]');
@@ -967,7 +1334,7 @@ function openEntryEditor(existing, presetType) {
       feed_kind: entryType === "feed" ? document.getElementById("f-feedkind").value : "",
       diaper_kind: entryType === "diaper" ? document.getElementById("f-diaperkind").value : "",
       note: document.getElementById("f-note").value.trim(),
-    }, e?.id ?? null, ev.currentTarget.dataset).catch((err) => saveFailed(err, { action: "save the entry", thing: "entry" }));
+    }, e?.id ?? null, ev.currentTarget.dataset, e).catch((err) => saveFailed(err, { action: "save the entry", thing: "entry" }));
   });
 }
 
@@ -983,6 +1350,13 @@ document.addEventListener("click", (e) => {
   if (t.hasAttribute("data-edit-shift")) { openShiftEditor(t.getAttribute("data-edit-shift")); return; }
   if (t.hasAttribute("data-delete-shift")) { deleteShift(t.getAttribute("data-delete-shift")); return; }
   if (t.hasAttribute("data-add-baby")) { openBabyEditor(); return; }
+  if (t.hasAttribute("data-set-sex")) { setBabySex(t.getAttribute("data-baby-id"), t.getAttribute("data-set-sex")); return; }
+  if (t.hasAttribute("data-units")) { setUnits(t.getAttribute("data-units")); return; }
+  if (t.hasAttribute("data-add-growth")) { openGrowthEditor(null); return; }
+  if (t.hasAttribute("data-edit-growth")) { openGrowthEditor(growth.find((x) => x.id === t.getAttribute("data-edit-growth"))); return; }
+  if (t.hasAttribute("data-delete-growth")) { deleteGrowth(t.getAttribute("data-delete-growth")); return; }
+  if (t.hasAttribute("data-records-retry")) { records.failed = false; render(); return; }
+  if (t.hasAttribute("data-report")) { openRecord(t.getAttribute("data-report"), t.getAttribute("data-format")); return; }
   if (t.hasAttribute("data-cancel")) { closeModal(); return; }
   if (t.hasAttribute("data-edit")) { openEntryEditor(entries.find((x) => x.id === t.getAttribute("data-edit"))); return; }
   if (t.hasAttribute("data-delete")) { deleteEntry(t.getAttribute("data-delete")); return; }

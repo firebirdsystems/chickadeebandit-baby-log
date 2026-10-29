@@ -3,6 +3,8 @@
  * No DOM, no fetch — importable in both browser and test environments.
  */
 
+import { WHO_LMS } from "./who-growth.js";
+
 export const ENTRY_TYPES = [
   { value: "feed",   label: "Feed",   glyph: "bottle" },
   { value: "diaper", label: "Diaper", glyph: "diaper" },
@@ -207,6 +209,26 @@ export function outcomeUnknown(e) {
 }
 
 /**
+ * Whether a failed write was the database refusing a second running nap for a
+ * child (one running nap per child, migration 004): a UNIQUE answer to a
+ * write that leaves a nap with no end.
+ */
+export function runningSleepClash(e, fields) {
+  const unique = e?.code === "UNIQUE_CONSTRAINT" || /UNIQUE constraint failed/i.test(String(e?.message ?? ""));
+  return unique && fields?.entry_type === "sleep" && !fields?.ended_at;
+}
+
+/**
+ * The form's fields that differ from the row it opened with, as { column:
+ * value }, compared as text with a missing value as empty. With no opened row
+ * (no edit), every field.
+ */
+export function changedFields(opened, fields) {
+  if (!opened) return { ...fields };
+  return Object.fromEntries(Object.entries(fields).filter(([k, v]) => String(v ?? "") !== String(opened[k] ?? "")));
+}
+
+/**
  * Whether a stored row differs from what the form holds now, over the form's
  * own fields only, compared as text with a missing value as empty.
  */
@@ -292,4 +314,339 @@ export function hoursByMember(shifts, days = 7, now = new Date()) {
     totals.set(s.member_id, cur);
   }
   return [...totals.values()].sort((a, b) => b.minutes - a.minutes || text(a.member_id).localeCompare(text(b.member_id)));
+}
+
+/* ── Household clock ────────────────────────────────────────────────────────
+ * `started_at` is the instant, in UTC. The report needs the household's day
+ * and time beside it (migration 004, `local_at`): SQL cannot move an instant
+ * into the household's zone.
+ */
+
+/**
+ * `YYYY-MM-DDTHH:MM` for an instant on the clock of `tz` (an IANA zone), with
+ * no zone written: the household's own time. The device's clock when `tz` is
+ * missing or unusable, as hub-sdk `hubToday` does. "" for a bad instant.
+ */
+export function localStamp(iso, tz) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  if (tz) {
+    try {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(d).map((p) => [p.type, p.value]));
+      if (parts.year && parts.month && parts.day && parts.hour && parts.minute) {
+        return `${parts.year.padStart(4, "0")}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+      }
+    } catch { /* unusable zone — fall through to the device clock */ }
+  }
+  return `${String(d.getFullYear()).padStart(4, "0")}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/* ── Growth ─────────────────────────────────────────────────────────────────
+ * Stored as whole grams and millimetres (migration 004); shown in the units
+ * the viewer picks.
+ */
+
+const GRAMS_PER_LB = 453.59237;
+const GRAMS_PER_OZ = 28.349523125;
+const MM_PER_IN = 25.4;
+
+/** "imperial" where pounds and inches are what a pediatrician says (the US, Liberia, Myanmar), else "metric". */
+export function defaultUnits(locale = "") {
+  return /-(US|LR|MM)\b/i.test(String(locale)) ? "imperial" : "metric";
+}
+
+/** Whole grams from a form's pounds and ounces, or its kilograms. null when nothing was entered or it is not a number. */
+export function gramsFrom({ units, lb = "", oz = "", kg = "" }) {
+  if (units === "imperial") {
+    if (String(lb).trim() === "" && String(oz).trim() === "") return null;
+    const pounds = String(lb).trim() === "" ? 0 : Number(lb);
+    const ounces = String(oz).trim() === "" ? 0 : Number(oz);
+    if (!Number.isFinite(pounds) || !Number.isFinite(ounces)) return NaN;
+    return Math.round(pounds * GRAMS_PER_LB + ounces * GRAMS_PER_OZ);
+  }
+  if (String(kg).trim() === "") return null;
+  const kilos = Number(kg);
+  return Number.isFinite(kilos) ? Math.round(kilos * 1000) : NaN;
+}
+
+/** Whole millimetres from inches or centimetres. null when empty, NaN when not a number. */
+export function mmFrom(value, units) {
+  if (String(value ?? "").trim() === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return NaN;
+  return Math.round(n * (units === "imperial" ? MM_PER_IN : 10));
+}
+
+/** Pounds and ounces (ounces to one place) for a form, from grams. */
+export function lbOz(grams) {
+  const totalOz = Math.round((grams / GRAMS_PER_OZ) * 10) / 10;
+  const lb = Math.floor(totalOz / 16);
+  return { lb, oz: Math.round((totalOz - lb * 16) * 10) / 10 };
+}
+
+/** "8 lb 4.2 oz" / "3.75 kg"; "" for no measurement. */
+export function fmtWeight(grams, units) {
+  if (grams == null || grams === "" || !Number.isFinite(Number(grams))) return "";
+  const g = Number(grams);
+  if (units === "imperial") {
+    const { lb, oz } = lbOz(g);
+    return `${lb} lb ${oz} oz`;
+  }
+  return `${(g / 1000).toFixed(g < 10000 ? 2 : 1)} kg`;
+}
+
+/** "21.5 in" / "54.6 cm"; "" for no measurement. */
+export function fmtLength(mm, units) {
+  if (mm == null || mm === "" || !Number.isFinite(Number(mm))) return "";
+  const n = Number(mm);
+  return units === "imperial" ? `${(n / MM_PER_IN).toFixed(1)} in` : `${(n / 10).toFixed(1)} cm`;
+}
+
+/** The number to put back in a length field, in the form's units. "" for none. */
+export function lengthValue(mm, units) {
+  if (mm == null || mm === "") return "";
+  return units === "imperial" ? String(Math.round((mm / MM_PER_IN) * 10) / 10) : String(Math.round(mm) / 10);
+}
+
+// Far outside any baby or toddler: a typo, or the wrong units.
+const GROWTH_RANGES = {
+  weight_g: [300, 40_000, "weight"],
+  length_mm: [200, 1_300, "length"],
+  head_mm: [200, 600, "head size"],
+};
+
+/**
+ * Why a measurement cannot be saved, or "". `fields` holds whole grams and
+ * millimetres (null = not measured, NaN = not a number) and the household
+ * date it was measured on; `today` is the household's today.
+ */
+export function growthError(fields, today) {
+  if (!isCalendarDate(fields.measured_date)) return "Choose the day it was measured.";
+  if (today && fields.measured_date > today) return "A measurement cannot be in the future.";
+  const keys = Object.keys(GROWTH_RANGES);
+  if (keys.every((k) => fields[k] == null)) return "Enter a weight, a length or a head size.";
+  for (const k of keys) {
+    const v = fields[k];
+    if (v == null) continue;
+    const [min, max, label] = GROWTH_RANGES[k];
+    if (!Number.isFinite(v)) return `The ${label} is not a number.`;
+    if (v < min || v > max) return `That ${label} looks wrong. Check the number and the units.`;
+  }
+  return "";
+}
+
+/** Measurements newest first: by the day measured, then by when they were recorded. */
+export function sortGrowth(rows) {
+  return [...rows].sort((a, b) => text(b.measured_date).localeCompare(text(a.measured_date))
+    || text(b.created_at).localeCompare(text(a.created_at)) || text(b.id).localeCompare(text(a.id)));
+}
+
+/** One measure over time, oldest first, as [{ date, value }]; measurements without it are left out. */
+export function growthSeries(rows, key) {
+  return sortGrowth(rows)
+    .reverse()
+    .filter((r) => r[key] != null && r[key] !== "" && Number.isFinite(Number(r[key])) && isCalendarDate(r.measured_date))
+    .map((r) => ({ date: r.measured_date, value: Number(r[key]) }));
+}
+
+/**
+ * Chart coordinates for a series inside a `width` × `height` box with `pad`
+ * on every side: x by calendar day, y by value, with the range widened a
+ * little so a flat line does not sit on the edge. [] for no points.
+ */
+export function chartPoints(series, width, height, pad = 8) {
+  if (!series.length) return [];
+  const day = (d) => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
+  const xs = series.map((p) => day(p.date));
+  const ys = series.map((p) => p.value);
+  const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+  let [y0, y1] = [Math.min(...ys), Math.max(...ys)];
+  const spread = y1 - y0 || Math.max(1, Math.abs(y1) * 0.1);
+  y0 -= spread * 0.1; y1 += spread * 0.1;
+  const w = width - pad * 2, h = height - pad * 2;
+  return series.map((p, i) => ({
+    ...p,
+    x: Math.round((pad + (x1 === x0 ? w / 2 : ((xs[i] - x0) / (x1 - x0)) * w)) * 10) / 10,
+    y: Math.round((pad + h - ((p.value - y0) / (y1 - y0)) * h) * 10) / 10,
+  }));
+}
+
+/* ── WHO percentiles ────────────────────────────────────────────────────────
+ * From the WHO Child Growth Standards' L, M and S values (who-growth.js), by
+ * the child's sex and actual age, birth to 24 months. Shown on the page only:
+ * the report is SQL, and a stored percentile would go stale when a birth date
+ * or sex is corrected.
+ */
+
+const DAYS_PER_MONTH = 365.25 / 12;
+// Two calendar years is 731 days across a leap day: still 24 months.
+const MAX_STANDARD_DAYS = 731;
+
+/** Whole days from `birthDate` to `date`, both `YYYY-MM-DD`; null when either is not a date. */
+export function ageInDays(birthDate, date) {
+  if (!isCalendarDate(birthDate) || !isCalendarDate(date)) return null;
+  const day = (d) => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
+  return Math.round((day(date) - day(birthDate)) / 86_400_000);
+}
+
+/** L, M and S for a measure at an age, interpolated between whole months; null outside birth to 24 months or for an unknown sex. */
+export function lmsAt(measure, sex, days) {
+  const rows = WHO_LMS[measure]?.[sex];
+  if (!rows || days == null || !Number.isFinite(days) || days < 0 || days > MAX_STANDARD_DAYS) return null;
+  const months = Math.min(days / DAYS_PER_MONTH, rows.length - 1);
+  const i = Math.min(Math.floor(months), rows.length - 2);
+  const f = months - i;
+  const [a, b] = [rows[i], rows[i + 1]];
+  return { L: a[0] + (b[0] - a[0]) * f, M: a[1] + (b[1] - a[1]) * f, S: a[2] + (b[2] - a[2]) * f };
+}
+
+/** The measure's value at z standard deviations: M(1 + LSz)^(1/L), or Me^(Sz) when L is 0. */
+function valueAtZ({ L, M, S }, z) {
+  return L === 0 ? M * Math.exp(S * z) : M * Math.pow(1 + L * S * z, 1 / L);
+}
+
+/**
+ * The z-score of a value. Past ±3, weight uses WHO's restricted method (the
+ * distance in units of the gap between the 2 and 3 SD lines), as WHO's own
+ * software does, so an extreme value is not pulled in by the skew.
+ */
+export function zScore(lms, x) {
+  const { L, M, S } = lms;
+  const z = L === 0 ? Math.log(x / M) / S : (Math.pow(x / M, L) - 1) / (L * S);
+  if (L === 1 || Math.abs(z) <= 3) return z;
+  const sd3 = valueAtZ(lms, 3 * Math.sign(z));
+  const sd2 = valueAtZ(lms, 2 * Math.sign(z));
+  return 3 * Math.sign(z) + (x - sd3) / Math.abs(sd3 - sd2);
+}
+
+/** Standard normal cumulative probability (Abramowitz and Stegun 7.1.26, error under 1.5e-7). */
+export function normalCdf(z) {
+  const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2);
+  const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+  const erf = 1 - poly * Math.exp(-(z * z) / 2);
+  return z >= 0 ? (1 + erf) / 2 : (1 - erf) / 2;
+}
+
+/** Which WHO measure a growth column is, and the factor from its stored unit to the standard's (g → kg, mm → cm). */
+export const WHO_MEASURES = {
+  weight_g: { measure: "weight", toStandard: 1 / 1000 },
+  length_mm: { measure: "length", toStandard: 1 / 10 },
+  head_mm: { measure: "head", toStandard: 1 / 10 },
+};
+
+/**
+ * The percentile (0–100) of a stored measurement for a child, or null when it
+ * cannot be placed: no sex, no birth date, older than 24 months, or no value.
+ */
+export function whoPercentile(column, value, sex, birthDate, measuredDate) {
+  const spec = WHO_MEASURES[column];
+  if (!spec || value == null || value === "" || !Number.isFinite(Number(value)) || Number(value) <= 0) return null;
+  const lms = lmsAt(spec.measure, sex, ageInDays(birthDate, measuredDate));
+  if (!lms) return null;
+  return normalCdf(zScore(lms, Number(value) * spec.toStandard)) * 100;
+}
+
+/** "48th" / "1st" / "below the 1st" / "above the 99th" for a percentile; "" for none. */
+export function percentileLabel(p) {
+  if (p == null || !Number.isFinite(p)) return "";
+  if (p < 1) return "below the 1st";
+  if (p > 99) return "above the 99th";
+  const n = Math.round(p);
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th");
+  return `${n}${suffix}`;
+}
+
+/**
+ * The lines drawn behind a growth chart, as US charts for under-2s label them:
+ * the 2nd and 98th are WHO's ±2 SD (2.3rd and 97.7th).
+ */
+export const PERCENTILE_LINES = [
+  { label: "2nd", z: -2 }, { label: "5th", z: -1.6449 }, { label: "10th", z: -1.2816 }, { label: "25th", z: -0.6745 },
+  { label: "50th", z: 0 }, { label: "75th", z: 0.6745 }, { label: "90th", z: 1.2816 }, { label: "95th", z: 1.6449 }, { label: "98th", z: 2 },
+];
+
+/** One percentile line's value, in the STORED unit (grams or millimetres), at each of `days`; null where the standard does not reach. */
+export function percentileLine(column, sex, z, days) {
+  const spec = WHO_MEASURES[column];
+  return days.map((d) => {
+    const lms = spec && lmsAt(spec.measure, sex, d);
+    return lms ? valueAtZ(lms, z) / spec.toStandard : null;
+  });
+}
+
+/**
+ * A growth chart on an age axis: the child's points, and the percentile lines
+ * across the same ages, in a `width` × `height` box with `pad` on each side.
+ * `points` are [{ days, value }] in stored units. Returns { dots, lines } with
+ * x/y coordinates, or null when the points cannot be placed by age.
+ */
+export function percentileChart(points, column, sex, width, height, pad = 8) {
+  if (!points.length || points.some((p) => p.days == null || p.days < 0 || p.days > MAX_STANDARD_DAYS)) return null;
+  let d0 = Math.min(...points.map((p) => p.days));
+  let d1 = Math.max(...points.map((p) => p.days));
+  // At least a month either side, so a single point sits among the lines.
+  if (d1 - d0 < 61) { const mid = (d0 + d1) / 2; d0 = Math.max(0, mid - 30.5); d1 = Math.min(MAX_STANDARD_DAYS, mid + 30.5); }
+  const steps = 24;
+  const days = Array.from({ length: steps + 1 }, (_, i) => d0 + ((d1 - d0) * i) / steps);
+  const raw = PERCENTILE_LINES.map((l) => ({ ...l, values: percentileLine(column, sex, l.z, days) }));
+  if (raw.some((l) => l.values.some((v) => v == null))) return null;
+  const all = [...points.map((p) => p.value), ...raw.flatMap((l) => l.values)];
+  let [y0, y1] = [Math.min(...all), Math.max(...all)];
+  const spread = (y1 - y0) || 1;
+  y0 -= spread * 0.04; y1 += spread * 0.04;
+  const w = width - pad * 2, h = height - pad * 2;
+  const x = (d) => Math.round((pad + (d1 === d0 ? w / 2 : ((d - d0) / (d1 - d0)) * w)) * 10) / 10;
+  const y = (v) => Math.round((pad + h - ((v - y0) / (y1 - y0)) * h) * 10) / 10;
+  return {
+    dots: points.map((p) => ({ ...p, x: x(p.days), y: y(p.value) })),
+    lines: raw.map((l) => ({ label: l.label, z: l.z, points: days.map((d, i) => ({ x: x(d), y: y(l.values[i]) })) })),
+  };
+}
+
+/* ── The doctor-visit report ────────────────────────────────────────────────
+ * The hub renders the documents (manifest `reports`). The page only chooses
+ * the dates and opens them.
+ */
+
+export function isCalendarDate(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
+  if (!m) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const d = new Date(Date.UTC(year, month - 1, day));
+  // setUTCFullYear, because Date.UTC reads a year below 100 as 19xx.
+  d.setUTCFullYear(year);
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+}
+
+/**
+ * The dates the report covers until someone picks their own: the 14 calendar
+ * days ending on `todayStr`, the HOUSEHOLD's today (the days the report is
+ * compared with are household days). The hub includes both ends.
+ */
+export function defaultRecordRange(todayStr) {
+  if (!isCalendarDate(todayStr)) return { from: "", to: "" };
+  const start = new Date(Date.UTC(Number(todayStr.slice(0, 4)), Number(todayStr.slice(5, 7)) - 1, Number(todayStr.slice(8, 10)) - 13));
+  return { from: start.toISOString().slice(0, 10), to: todayStr };
+}
+
+/** Why a chosen range cannot be opened, or "". The hub refuses these too, but in a new tab. */
+export function recordRangeError(from, to) {
+  for (const [label, value] of [["From", from], ["To", to]]) {
+    if (value && !isCalendarDate(value)) return `${label} is not a date.`;
+  }
+  if (from && to && from > to) return "From must not be later than To.";
+  return "";
+}
+
+/** The address of one document. An empty bound is left off, which the hub reads as open-ended. */
+export function recordUrl(reportsUrl, id, format, from, to, base) {
+  const url = new URL(`${reportsUrl}/${encodeURIComponent(id)}`, base);
+  url.searchParams.set("format", format);
+  if (from) url.searchParams.set("from", from);
+  if (to) url.searchParams.set("to", to);
+  return url.toString();
 }

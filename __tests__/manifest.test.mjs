@@ -42,7 +42,7 @@ describe("manifest.json", () => {
   });
 
   it("every stamped column is a member reference kept when the member leaves", () => {
-    for (const table of ["babies", "entries", "shifts"]) {
+    for (const table of ["babies", "entries", "shifts", "growth"]) {
       expect(manifest.member_references?.[table]?.on_removed, table).toBe("keep");
     }
   });
@@ -60,6 +60,6 @@ describe("manifest.json", () => {
   });
 
   it("ai exports match the query files", () => {
-    expect(manifest.ai_access?.db_exports?.sort()).toEqual(["babies", "recent_entries"]);
+    expect(manifest.ai_access?.db_exports?.sort()).toEqual(["babies", "growth", "recent_entries"]);
   });
 });

@@ -6,7 +6,7 @@
   ],
   "name": "Baby Log",
   "version": "1.0.0",
-  "description": "Track feeds, diapers, naps, and pumping for your baby — quick one-tap logging, a running sleep timer, a daily summary every caregiver can see, and a shift log for the nanny.",
+  "description": "Track feeds, diapers, naps, pumping and growth for your baby — quick one-tap logging, a running sleep timer, a daily summary every caregiver can see, growth charts with WHO percentiles, a report to take to the pediatrician, and a shift log for the nanny.",
   "entrypoint": "index.html",
   "runtime": "static",
   "category": "family",
@@ -18,7 +18,9 @@
     "diapers",
     "parenting",
     "nanny",
-    "caregiver"
+    "caregiver",
+    "growth",
+    "pediatrician"
   ],
   "icon": "🍼",
   "data_access": {
@@ -34,21 +36,29 @@
   "storage": "db",
   "preload": {
     "babies": {
-      "sql": "SELECT id, name, birth_date, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"
+      "sql": "SELECT id, name, birth_date, sex, emoji, archived, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"
     },
     "entries": {
       "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"
+    },
+    "running_sleeps": {
+      "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries WHERE entry_type = 'sleep' AND (ended_at IS NULL OR ended_at = '')"
     },
     "shifts": {
       "sql": "SELECT id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at FROM app_baby_log__shifts WHERE ended_at = '' OR started_at >= date(?, '-30 days') ORDER BY started_at DESC, id DESC",
       "params": [
         ":today"
       ]
+    },
+    "growth": {
+      "sql": "SELECT id, baby_id, measured_date, weight_g, length_mm, head_mm, note, created_by, created_by_name, created_at FROM app_baby_log__growth ORDER BY measured_date DESC, created_at DESC LIMIT 500"
     }
   },
   "db_plaintext_columns": [
     "entry_type",
-    "birth_date"
+    "birth_date",
+    "feed_kind",
+    "diaper_kind"
   ],
   "row_policies": {
     "babies": {
@@ -149,6 +159,27 @@
           "writable_by": []
         }
       }
+    },
+    "growth": {
+      "kind": "owner_or_visibility",
+      "member_column": "created_by",
+      "visibility_column": "visibility",
+      "everyone_values": [
+        "everyone"
+      ],
+      "write_visibility_scoped": true,
+      "delete_adult_only": true,
+      "column_write_acls": {
+        "created_by": {
+          "writable_by": [],
+          "actions": [
+            "update"
+          ]
+        },
+        "visibility": {
+          "writable_by": []
+        }
+      }
     }
   },
   "retention": {
@@ -172,6 +203,10 @@
     },
     "shifts": {
       "column": "member_id",
+      "on_removed": "keep"
+    },
+    "growth": {
+      "column": "created_by",
       "on_removed": "keep"
     }
   },
@@ -198,12 +233,175 @@
       "when": "at"
     }
   },
+  "reports": {
+    "views": [
+      {
+        "id": "daily_summary",
+        "title": "Daily summary",
+        "description": "Each day's feeds, diapers, sleep and pumping for each child, on the household's calendar. Sleep is counted on the day the nap or night began, and only once it has ended. A blank count means some of that day's entries do not say which kind they were.",
+        "source": {
+          "kind": "sql",
+          "query": "SELECT b.name AS child, substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) AS day, SUM(e.entry_type = 'feed') AS feeds, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind IN ('nurse-left','nurse-right')) END AS breast, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind = 'bottle') END AS bottles, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind = 'solids') END AS solids, SUM(CASE WHEN e.entry_type = 'feed' THEN e.amount_ml END) AS fed_ml, SUM(e.entry_type = 'diaper') AS diapers, CASE WHEN SUM(e.entry_type = 'diaper') > SUM(e.diaper_kind IN ('wet','dirty','both')) THEN NULL ELSE SUM(e.diaper_kind IN ('wet','both')) END AS wet, CASE WHEN SUM(e.entry_type = 'diaper') > SUM(e.diaper_kind IN ('wet','dirty','both')) THEN NULL ELSE SUM(e.diaper_kind IN ('dirty','both')) END AS dirty, CASE WHEN SUM(CASE WHEN e.entry_type = 'sleep' AND e.ended_at > e.started_at THEN julianday(e.ended_at) - julianday(e.started_at) END) IS NULL THEN NULL ELSE printf('%.1f', SUM(CASE WHEN e.entry_type = 'sleep' AND e.ended_at > e.started_at THEN julianday(e.ended_at) - julianday(e.started_at) END) * 24) END AS sleep_hours, SUM(CASE WHEN e.entry_type = 'pump' THEN e.amount_ml END) AS pumped_ml FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN :range_start AND :range_end GROUP BY b.id, day ORDER BY b.created_at, b.id, day DESC"
+        },
+        "columns": [
+          {
+            "key": "child",
+            "label": "Child"
+          },
+          {
+            "key": "day",
+            "label": "Day",
+            "format": "date"
+          },
+          {
+            "key": "feeds",
+            "label": "Feeds"
+          },
+          {
+            "key": "breast",
+            "label": "Breast"
+          },
+          {
+            "key": "bottles",
+            "label": "Bottle"
+          },
+          {
+            "key": "solids",
+            "label": "Solids"
+          },
+          {
+            "key": "fed_ml",
+            "label": "Fed (ml)"
+          },
+          {
+            "key": "diapers",
+            "label": "Diapers"
+          },
+          {
+            "key": "wet",
+            "label": "Wet"
+          },
+          {
+            "key": "dirty",
+            "label": "Dirty"
+          },
+          {
+            "key": "sleep_hours",
+            "label": "Sleep (hours)"
+          },
+          {
+            "key": "pumped_ml",
+            "label": "Pumped (ml)"
+          }
+        ]
+      },
+      {
+        "id": "entries",
+        "title": "Every entry",
+        "description": "Every feed, diaper, nap, pumping and note logged for each child, newest first, at the household's local time, with who logged it.",
+        "source": {
+          "kind": "sql",
+          "query": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'feed' THEN 'Feed' WHEN 'diaper' THEN 'Diaper' WHEN 'sleep' THEN 'Sleep' WHEN 'pump' THEN 'Pumping' WHEN 'note' THEN 'Note' ELSE e.entry_type END AS kind, CASE e.entry_type WHEN 'feed' THEN CASE e.feed_kind WHEN 'bottle' THEN 'Bottle' WHEN 'nurse-left' THEN 'Breast, left' WHEN 'nurse-right' THEN 'Breast, right' WHEN 'solids' THEN 'Solids' ELSE e.feed_kind END WHEN 'diaper' THEN CASE e.diaper_kind WHEN 'wet' THEN 'Wet' WHEN 'dirty' THEN 'Dirty' WHEN 'both' THEN 'Wet and dirty' ELSE e.diaper_kind END ELSE '' END AS detail, e.amount_ml AS amount_ml, CASE WHEN e.ended_at > e.started_at THEN CAST(ROUND((julianday(e.ended_at) - julianday(e.started_at)) * 1440) AS INTEGER) END AS minutes, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN :range_start AND :range_end ORDER BY b.created_at, b.id, e.started_at DESC, e.id"
+        },
+        "columns": [
+          {
+            "key": "child",
+            "label": "Child"
+          },
+          {
+            "key": "at_time",
+            "label": "When",
+            "format": "datetime"
+          },
+          {
+            "key": "kind",
+            "label": "Entry"
+          },
+          {
+            "key": "detail",
+            "label": "Kind"
+          },
+          {
+            "key": "amount_ml",
+            "label": "Amount (ml)"
+          },
+          {
+            "key": "minutes",
+            "label": "Minutes"
+          },
+          {
+            "key": "note",
+            "label": "Note"
+          },
+          {
+            "key": "who",
+            "label": "Logged by",
+            "format": "member"
+          }
+        ]
+      },
+      {
+        "id": "growth",
+        "title": "Growth",
+        "description": "Weight, length and head size for each child, newest first, in metric and imperial units. A blank means it was not measured that time.",
+        "source": {
+          "kind": "sql",
+          "query": "SELECT b.name AS child, g.measured_date AS measured_date, CASE WHEN g.weight_g IS NULL THEN NULL ELSE printf('%.3f', g.weight_g / 1000.0) END AS weight_kg, CASE WHEN g.weight_g IS NULL THEN NULL ELSE printf('%d lb %.1f oz', CAST(ROUND(g.weight_g / 28.349523125, 1) / 16 AS INTEGER), ROUND(g.weight_g / 28.349523125, 1) - 16 * CAST(ROUND(g.weight_g / 28.349523125, 1) / 16 AS INTEGER)) END AS weight_lb, CASE WHEN g.length_mm IS NULL THEN NULL ELSE printf('%.1f', g.length_mm / 10.0) END AS length_cm, CASE WHEN g.length_mm IS NULL THEN NULL ELSE printf('%.1f', g.length_mm / 25.4) END AS length_in, CASE WHEN g.head_mm IS NULL THEN NULL ELSE printf('%.1f', g.head_mm / 10.0) END AS head_cm, CASE WHEN g.head_mm IS NULL THEN NULL ELSE printf('%.1f', g.head_mm / 25.4) END AS head_in, g.note AS note, CASE WHEN g.created_by_name = '' THEN g.created_by ELSE g.created_by_name END AS who FROM app_baby_log__growth g JOIN app_baby_log__babies b ON b.id = g.baby_id WHERE b.archived = 0 AND g.measured_date >= :range_start AND g.measured_date <= :range_end ORDER BY b.created_at, b.id, g.measured_date DESC, g.created_at DESC"
+        },
+        "columns": [
+          {
+            "key": "child",
+            "label": "Child"
+          },
+          {
+            "key": "measured_date",
+            "label": "Measured",
+            "format": "date"
+          },
+          {
+            "key": "weight_kg",
+            "label": "Weight (kg)"
+          },
+          {
+            "key": "weight_lb",
+            "label": "Weight (lb, oz)"
+          },
+          {
+            "key": "length_cm",
+            "label": "Length (cm)"
+          },
+          {
+            "key": "length_in",
+            "label": "Length (in)"
+          },
+          {
+            "key": "head_cm",
+            "label": "Head (cm)"
+          },
+          {
+            "key": "head_in",
+            "label": "Head (in)"
+          },
+          {
+            "key": "note",
+            "label": "Note"
+          },
+          {
+            "key": "who",
+            "label": "Recorded by",
+            "format": "member"
+          }
+        ]
+      }
+    ]
+  },
   "ai_access": {
     "allowed": true,
     "mode": "read",
     "db_exports": [
       "recent_entries",
-      "babies"
+      "babies",
+      "growth"
     ]
   }
 }
