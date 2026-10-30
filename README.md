@@ -2,9 +2,9 @@
 
 A [Chickadee Bandit](https://chickadeebandit.com/app-library/baby-log) app.
 
-Feed, diaper, sleep, and pumping log for the newborn/infant phase — quick
-one-tap logging, a running sleep timer, and a shared daily summary every
-caregiver can see.
+Feed, diaper, sleep, pumping, temperature and medicine log for the
+newborn/infant phase — quick one-tap logging, a running sleep timer, and a
+shared daily summary every caregiver can see.
 
 - **Storage:** D1 (`app_baby_log__babies`, `app_baby_log__entries`,
   `app_baby_log__shifts`, `app_baby_log__growth`)
@@ -24,6 +24,25 @@ caregiver can see.
   Days and times are the household's: each entry stores `local_at` beside the
   UTC `started_at` (migration 004). Report queries read the tables directly —
   the governed read refuses a governed table inside a CTE or subquery.
+- **Temperatures and medicines:** two entry types (migration 006). A reading
+  is whole hundredths of a degree Celsius (`temp_c100`, so a typed °F comes
+  back exact), shown in °F or °C with the growth units, with how it was taken
+  (`temp_method`, plaintext; `temp_c100` is declared plaintext too, because
+  the mobile Siri intent binds every value as text); a reading shown as 38.0 °C (100.4 °F) or more
+  is labelled a fever, never advised on. A medicine is what was given (`med_name`, `med_dose`,
+  encrypted free text) and the wait before the next dose
+  (`repeat_after_min`). The log shows the last reading of the past 24 hours and, per
+  medicine, "not again before" — the last dose plus that dose's own wait (the
+  form fills in the medicine's last wait; a dose saved with none has none).
+  Nothing is sent: a push saying a dose is possible reads as a prompt to give
+  one. A new dose of a medicine still inside its wait shows that wait in the
+  form; the doses are read again as it is saved, and one another caregiver
+  gave meanwhile is shown first. Neither stops the save. The report's "Temperatures and medicines" view is for a
+  sick visit; the daily summary is at the hub's 12-column cap and leaves them
+  out. The mobile widget shows the soonest wait and the last day's reading, and
+  Siri answers "When can the baby have more Tylenol" and logs a temperature
+  (packages/mobile DESIGN-baby-log-widget.md). Vaccines are not kept here —
+  the log expires after two years.
 - **Shift log:** started, ended, what was done, and a handoff note the next
   person reads first, with hours per person for the week.
 - **Reminders:** manifest `interval_reminders`, sent by the hub's household

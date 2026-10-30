@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Baby Log</title>
   <style>
+    /* `hidden` wins over a class's display (a .field is a grid). */
+    [hidden] { display: none !important; }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg: var(--hub-bg, #f9fafb);
@@ -54,7 +56,7 @@
       border-radius: 999px; padding: 5px 13px; font: inherit; font-size: .84rem; font-weight: 700; cursor: pointer;
     }
     .tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-    .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+    .quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
     .quick button {
       display: grid; gap: 2px; justify-items: center; padding: 10px 4px;
       background: var(--surface); border: 1px solid var(--border-mid); border-radius: var(--radius);
@@ -96,7 +98,7 @@
     input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
     .modal-actions { display: flex; gap: 8px; margin-top: 6px; justify-content: flex-end; }
     .modal-left { margin-right: auto; }
-    @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } .quick { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
     .load-error { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--hub-tint-danger, #fee2e2); color: var(--hub-tint-danger-fg, #b91c1c); font-size: 0.9rem; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
     .load-error-retry { background: none; border: 1px solid currentColor; border-radius: 8px; padding: 5px 10px; font: inherit; font-weight: 600; color: inherit; cursor: pointer; flex-shrink: 0; }
     .search-row { margin-bottom: 12px; }
@@ -137,6 +139,7 @@ import {
   localStamp, defaultUnits, gramsFrom, mmFrom, lbOz, fmtWeight, fmtLength, lengthValue, growthError, sortGrowth,
   growthSeries, chartPoints, ageInDays, whoPercentile, percentileLabel, percentileChart, WHO_MEASURES, defaultRecordRange, recordRangeError, recordUrl,
   REMINDER_KINDS, reminderMinutes, suggestedMinutes, fmtMinutes, reminderChoices, nextReminders,
+  TEMP_METHODS, tempC100From, tempValue, fmtTemp, isFever, tempError, medicineError, repeatChoices, recentMedicines, knownMedicine, nextDoses, doseWaits, latestTemperature, healthLineChangesAt,
 } from "./logic.js";
 
 const CONTEXT = window.__CONTEXT_URL ?? "";
@@ -176,7 +179,7 @@ let modalEl = null;
 let tickTimer = null;
 
 function nowIso() { return new Date().toISOString(); }
-const ENTRY_COLS = "id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at";
+const ENTRY_COLS = "id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at";
 const SLEEP_RUNNING = "A nap is already running for this child. End that one first.";
 // When an entry started on the household's clock, written beside the UTC
 // instant for the doctor-visit report (migration 004).
@@ -250,27 +253,79 @@ async function loadBabies() {
   babies = res.rows ?? [];
 }
 
-async function loadEntries() {
+// Reads of the log land in the order they were started: one that comes back
+// after a later one would put the older log back. `stillGood` is a re-read's
+// own extra condition.
+let readsStarted = 0;
+let readsApplied = 0;
+let lastReadAt = 0;
+async function readInOrder(stillGood = () => true) {
+  const id = ++readsStarted;
+  const rows = await readEntries();
+  if (id < readsApplied || !stillGood()) return false;
+  readsApplied = id;
+  lastReadAt = Date.now();
+  entries = rows;
+  return true;
+}
+async function loadEntries() { return readInOrder(); }
+
+// A read of the log a page makes on its own (a form opening, the page shown
+// again) lands only if no write was out at any point while it was: it may have
+// been read before that write landed, and would put back a nap just ended, a
+// dose just given or a row just removed. `writesOut` counts the writes out;
+// `writesDone` moves as each ends, so one that started and ended during the
+// read is seen too. Not in the demo, whose log lives only on the page.
+let writesOut = 0;
+let writesDone = 0;
+async function rereadEntries() {
+  if (!DB || writesOut) return false;
+  const done = writesDone;
+  const applied = await readInOrder(() => !writesOut && done === writesDone);
+  // Only the log shows entries; a redraw elsewhere would drop a date being typed.
+  if (applied && view === "log") render();
+  return applied;
+}
+function trackedWrite(write) {
+  return async (...args) => {
+    writesOut++;
+    try { return await write(...args); } finally { writesOut--; writesDone++; }
+  };
+}
+
+async function readEntries() {
   if (!DB) {
     const now = Date.now();
-    entries = [
+    return [
       { id: "e1", baby_id: "demo-baby", entry_type: "feed", started_at: new Date(now - 90 * 60000).toISOString(), ended_at: null, amount_ml: 120, feed_kind: "bottle", diaper_kind: "", note: "", created_by: "demo-3", created_by_name: "Pat", created_at: nowIso() },
       { id: "e2", baby_id: "demo-baby", entry_type: "diaper", started_at: new Date(now - 3 * 3600000).toISOString(), ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "wet", note: "", created_by: "demo-2", created_by_name: "Jordan", created_at: nowIso() },
       { id: "e3", baby_id: "demo-baby", entry_type: "sleep", started_at: new Date(now - 5 * 3600000).toISOString(), ended_at: new Date(now - 3.5 * 3600000).toISOString(), amount_ml: null, feed_kind: "", diaper_kind: "", note: "", created_by: "demo-1", created_by_name: "Alex", created_at: nowIso() },
     ];
-    return;
   }
   // Bounded: the timeline shows the recent log; retain_days prunes the rest.
   // Every running nap is read as well, however old: one left running past
   // the newest 400 entries would otherwise be invisible, and the database
   // (one running nap per child, migration 004) would refuse every new start.
-  const [res, running] = await Promise.all([
-    db("SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"),
-    db("SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries WHERE entry_type = 'sleep' AND (ended_at IS NULL OR ended_at = '')"),
+  // And the doses on their own: a long wait (weekly drops) outlives 400
+  // entries of feeds and diapers.
+  const [res, running, medicines] = await Promise.all([
+    // Written out, not built from ENTRY_COLS: manifest.preload answers them by their text.
+    db("SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"),
+    db("SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at FROM app_baby_log__entries WHERE entry_type = 'sleep' AND (ended_at IS NULL OR ended_at = '')"),
+    readDoses(),
   ]);
   const recent = res.rows ?? [];
   const seen = new Set(recent.map((e) => e.id));
-  entries = [...recent, ...(running.rows ?? []).filter((e) => !seen.has(e.id))];
+  const more = [...(running.rows ?? []), ...medicines].filter((e) => !seen.has(e.id) && seen.add(e.id));
+  return [...recent, ...more];
+}
+
+// Every child's recent doses — the widget's read (mobile BabyLogBoard) too.
+// Read again when a new dose is saved, so it is judged against the log as it
+// is then, not as the page last read it.
+async function readDoses() {
+  const res = await db("SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at FROM app_baby_log__entries WHERE entry_type = 'medicine' ORDER BY started_at DESC LIMIT 200");
+  return res.rows ?? [];
 }
 
 // Recent shifts and every one still running, however long ago it started, so
@@ -450,7 +505,7 @@ async function saveReminders(id, values) {
   loadReminderStatus();
 }
 
-async function saveEntry(fields, existingId, pinHost = null, opened = null) {
+const saveEntry = trackedWrite(async function saveEntry(fields, existingId, pinHost = null, opened = null) {
   const now = nowIso();
   if (existingId) {
     const words = { action: "save the entry", thing: "entry" };
@@ -493,15 +548,17 @@ async function saveEntry(fields, existingId, pinHost = null, opened = null) {
     // sent on every retry: a try whose answer was lost may have stored the
     // entry, and a second press must find it rather than log it twice.
     const id = pinHost ? (pinHost.rowId ??= crypto.randomUUID()) : crypto.randomUUID();
-    let row = { id, baby_id: currentBabyId, ...fields, created_by: me.id, created_by_name: me.name ?? "", created_at: now };
+    // Every column the INSERT names, so a caller passing only some (the sleep
+    // timer) sends the column's empty value, never a NULL a NOT NULL column refuses.
+    let row = { id, baby_id: currentBabyId, ended_at: null, amount_ml: null, feed_kind: "", diaper_kind: "", temp_c100: null, temp_method: "", med_name: "", med_dose: "", repeat_after_min: null, note: "", ...fields, created_by: me.id, created_by_name: me.name ?? "", created_at: now };
     let note = "";
     try {
       await db(
-        "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [row.id, row.baby_id, row.entry_type, row.started_at, householdStamp(row.started_at), row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.note, row.created_by, row.created_by_name, row.created_at],
+        "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [row.id, row.baby_id, row.entry_type, row.started_at, householdStamp(row.started_at), row.ended_at, row.amount_ml, row.feed_kind, row.diaper_kind, row.temp_c100, row.temp_method, row.med_name, row.med_dose, row.repeat_after_min, row.note, row.created_by, row.created_by_name, row.created_at],
       );
     } catch (e) {
-      const stored = await landedUnheard(e, "app_baby_log__entries", "id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at", id);
+      const stored = await landedUnheard(e, "app_baby_log__entries", ENTRY_COLS, id);
       // Not ours, and UNIQUE on a running nap: someone else started one for
       // this child first (one running nap per child, migration 004). Nothing
       // was stored; the log is read again so it shows the nap that is running.
@@ -534,18 +591,24 @@ async function saveEntry(fields, existingId, pinHost = null, opened = null) {
     closeModal();
     render();
     // Only once the entry exists; a failed publish is not a failed save.
-    await publishEvent("baby.entry_logged", row.id, {
+    // Not awaited: best-effort, and awaiting it would keep this write counted
+    // as out (trackedWrite) and hold off the page's re-reads until it answered.
+    publishEvent("baby.entry_logged", row.id, {
       baby_id: row.baby_id,
       entry_type: row.entry_type,
       started_at: row.started_at,
       amount_ml: row.amount_ml,
     });
   }
-}
+});
 
+// The confirm is asked before the write is counted as out: a dialog left open
+// is not a write, and must not hold off the page's re-reads.
 async function deleteEntry(id) {
   const ok = await hubConfirm({ message: "Delete this entry?", confirmLabel: "Delete", destructive: true });
-  if (!ok) return;
+  if (ok) await removeEntry(id);
+}
+const removeEntry = trackedWrite(async function removeEntry(id) {
   const prev = entries;
   entries = entries.filter((e) => e.id !== id);
   closeModal();
@@ -561,14 +624,14 @@ async function deleteEntry(id) {
     if (gone !== true) entries = prev;
     showError(unchangedWriteLine(gone, words));
   }
-}
+});
 
 // The sleep timer's pending start per baby: its id and start time are kept
 // until the outcome is known, so a second tap after a lost answer finds the first.
 const sleepPins = new Map();
 
 /** Toggle the sleep timer: start a running entry, or stamp ended_at on it. */
-async function toggleSleep() {
+const toggleSleep = trackedWrite(async function toggleSleep() {
   const babyId = currentBabyId;
   let pin = sleepPins.get(babyId);
   // A pinned start a later load found stored is settled.
@@ -611,7 +674,7 @@ async function toggleSleep() {
     // Settled (saved, or refused outright): the next start is a new one.
     if (!pin.rowId && sleepPins.get(babyId) === pin) sleepPins.delete(babyId);
   }
-}
+});
 
 /* ── Shifts ────────────────────────────────────────────────────────────────── */
 // A nanny or sitter's day: started, ended, what was done, and a handoff note
@@ -1108,6 +1171,25 @@ function nextRemindersHtml(baby) {
   return `<p class="muted tiny" data-testid="next-reminders" style="margin:8px 2px 0">${esc(parts.join(" · "))}</p>`;
 }
 
+// "Last temperature 101.2 °F, fever, 1:05 PM · Infant Tylenol 2.5 ml at 2:10 PM,
+// not again before 6:10 PM": what the next caregiver must know first. The
+// latest reading of the last day, and each medicine still inside its wait.
+function healthLineHtml(temp, waits) {
+  const parts = [];
+  if (temp) parts.push(`Last temperature ${fmtTemp(temp.temp_c100, units)}${isFever(temp.temp_c100, units) ? ", fever" : ""}, ${fmtWhenShort(new Date(temp.started_at))}`);
+  for (const w of waits) parts.push(doseWaitText(w));
+  if (!parts.length) return "";
+  return `<p class="muted tiny" data-testid="health-line" style="margin:8px 2px 0">${esc(parts.join(" · "))}</p>`;
+}
+function doseWaitText(w) {
+  return `${w.name}${w.dose ? ` ${w.dose}` : ""} at ${fmtWhenShort(new Date(w.givenAt))}, not again before ${fmtWhenShort(w.notBefore)}`;
+}
+// The clock alone today, the day too when it is not.
+function fmtWhenShort(date) {
+  const iso = date.toISOString();
+  return dayKey(iso) === dayKey(nowIso()) ? fmtClock(iso) : fmtWhen(iso);
+}
+
 function renderReminders(baby) {
   // A failed status check still shows the settings, under a banner: saving
   // does not need the status, and a parent must be able to turn a reminder off.
@@ -1191,7 +1273,7 @@ function renderReport() {
   return `
     <div class="section-head"><h2>For the pediatrician</h2></div>
     <div class="card stack" data-testid="record-card">
-      <div>One document with a daily summary of feeds, diapers and sleep, every entry, and the growth measurements, for every child and the dates below. Open it and print it${fullPdf ? ", or download it as a PDF" : ", or save it as a PDF from the print dialog"}.</div>
+      <div>One document with a daily summary of feeds, diapers and sleep, every entry, temperatures and medicines for a sick visit, and the growth measurements, for every child and the dates below. Open it and print it${fullPdf ? ", or download it as a PDF" : ", or save it as a PDF from the print dialog"}.</div>
       <div class="grid2">
         <div class="field"><label for="rec-from">From</label><input id="rec-from" type="date" value="${esc(recordFrom)}"></div>
         <div class="field"><label for="rec-to">To</label><input id="rec-to" type="date" value="${esc(recordTo)}"></div>
@@ -1232,7 +1314,7 @@ function renderEntry(e) {
   const meta = typeMeta(e.entry_type);
   const t = new Date(e.started_at);
   const time = Number.isNaN(t.getTime()) ? "" : new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(t);
-  const detail = entryDetail(e);
+  const detail = entryDetail(e, units);
   return `
     <div class="entry">
       <div class="entry-icon" aria-hidden="true">${glyph(meta.glyph)}</div>
@@ -1258,10 +1340,7 @@ document.addEventListener("change", (e) => {
 document.addEventListener("input", (e) => {
   if (e.target.id !== "search") return;
   searchQ = e.target.value;
-  const caret = e.target.selectionStart;
-  render();
-  const next = document.getElementById("search");
-  if (next) { next.focus(); next.setSelectionRange(caret, caret); }
+  render();   // keeps the box's focus and caret (see render)
 });
 
 // Every redraw rebuilds the page from state, and a status answer can land while
@@ -1270,7 +1349,11 @@ document.addEventListener("input", (e) => {
 function render() {
   const form = document.getElementById("reminders-form");
   const draft = form && [...form.querySelectorAll("[data-reminder]")].map((el) => [el.dataset.reminder, el.value]);
+  // A timed redraw must not take the search box from someone typing in it.
+  const searching = document.activeElement?.id === "search" ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   drawPage();
+  const box = searching && document.getElementById("search");
+  if (box) { box.focus(); box.setSelectionRange(...searching); }
   const next = document.getElementById("reminders-form");
   if (draft && next && next.dataset.babyId === form.dataset.babyId) {
     for (const [id, value] of draft) {
@@ -1311,6 +1394,8 @@ function drawPage() {
   const babyEntries = entries.filter((e) => e.baby_id === baby.id);
   const today = summarizeDay(babyEntries, dayKey(nowIso()));
   const sleeping = !!runningSleep(babyEntries, baby.id);
+  const waits = nextDoses(entries, baby.id);
+  const lastTemp = latestTemperature(entries, baby.id);
   // Search narrows the entries before they are grouped, so empty days drop out.
   const shownEntries = searchQ
     ? babyEntries.filter((e) => searchMatch(searchQ, searchableFields(e)))
@@ -1336,11 +1421,14 @@ function drawPage() {
       <div class="stat"><span class="v">${today.sleepMs ? esc(fmtDuration(today.sleepMs)) : "—"}${today.sleeping ? ` ${glyph("moon")}` : ""}</span><span class="k">Sleep today</span></div>
     </div>
     ${nextRemindersHtml(baby)}
+    ${healthLineHtml(lastTemp, waits)}
     ${canLog() ? `
       <div class="quick">
         <button data-quick="feed"><span class="q-icon">${glyph("bottle")}</span>Feed</button>
         <button data-quick="diaper"><span class="q-icon">${glyph("diaper")}</span>Diaper</button>
         <button data-quick="sleep" class="${sleeping ? "sleeping" : ""}"><span class="q-icon">${glyph("moon")}</span>${sleeping ? "End sleep" : "Sleep"}</button>
+        <button data-quick="temperature"><span class="q-icon">${glyph("thermometer")}</span>Temp</button>
+        <button data-quick="medicine"><span class="q-icon">${glyph("pill")}</span>Medicine</button>
         <button data-quick="more"><span class="q-icon">${glyph("plus")}</span>More</button>
       </div>` : ""}
     ${shiftBarHtml()}
@@ -1357,8 +1445,16 @@ function drawPage() {
   // Keep the running-sleep total ticking without a full data reload. On the
   // log only: a render rebuilds the whole view, and on another tab it would
   // throw away a date or a number being typed.
-  clearInterval(tickTimer);
+  clearTimeout(tickTimer);   // clears an interval too
+  // The health line changes too, but rarely, so it redraws once, at the next
+  // change rather than every minute: a wait ending, the last reading leaving
+  // after 24 hours, a dose or reading dated ahead coming due, and midnight,
+  // when a time from the day before gains its date.
   if (sleeping && view === "log") tickTimer = setInterval(render, 60000);
+  else if (view === "log") {
+    const at = healthLineChangesAt(entries, baby.id);
+    if (at != null) tickTimer = setTimeout(render, Math.min(at - Date.now() + 1000, 2 ** 31 - 1));
+  }
 }
 
 /* ── Modals ────────────────────────────────────────────────────────────────── */
@@ -1413,6 +1509,16 @@ function openEntryEditor(existing, presetType) {
   const e = existing ?? null;
   const type = e?.entry_type ?? presetType ?? "feed";
   const typeOptions = ENTRY_TYPES.map((t) => `<option value="${t.value}" ${t.value === type ? "selected" : ""}>${t.label}</option>`).join("");
+  // The doses this form judges by: the page's log, then the doses as read
+  // again when Log it is pressed (kept in the form, not put back in the page's).
+  let doseLog = entries;
+  // The medicines this child has had, newest first: a repeat dose is one tap
+  // on the newest six, and any of them typed fills in its wait.
+  let meds = recentMedicines(doseLog, e?.baby_id ?? currentBabyId);
+  const chipsHtml = () => meds.slice(0, 6).map((m, i) => `<button type="button" class="tab" data-med-fill="${i}">${esc(m.med_name)}${m.med_dose ? ` · ${esc(m.med_dose)}` : ""}</button>`).join("");
+  const storedRepeat = e?.repeat_after_min == null || e.repeat_after_min === "" ? null : Number(e.repeat_after_min);
+  const repeatOptions = (selected) => `<option value="">Not said</option>${repeatChoices(selected).map((m) => `<option value="${m}" ${m === selected ? "selected" : ""}>${fmtMinutes(m)}</option>`).join("")}`;
+  const tempUnit = units === "imperial" ? "°F" : "°C";
   openModal(`
     <h2>${e ? "Edit entry" : "Log " + esc(typeMeta(type).label.toLowerCase())}</h2>
     <form class="form" id="entry-form">
@@ -1433,7 +1539,22 @@ function openEntryEditor(existing, presetType) {
             ${["wet", "dirty", "both"].map((k) => `<option value="${k}" ${e?.diaper_kind === k ? "selected" : ""}>${diaperKindLabel(k)}</option>`).join("")}
           </select>
         </div>
+        <div class="field" data-show="temperature"><label for="f-temp">Temperature (${tempUnit})</label><input id="f-temp" type="number" step="any" inputmode="decimal" value="${esc(tempValue(e?.temp_c100, units))}" /></div>
+        <div class="field" data-show="temperature"><label for="f-method">Taken</label>
+          <select id="f-method">
+            <option value="">Not said</option>
+            ${TEMP_METHODS.map((m) => `<option value="${m.value}" ${e?.temp_method === m.value ? "selected" : ""}>${m.label}</option>`).join("")}
+          </select>
+        </div>
       </div>
+      ${!e ? `<div class="field" data-show="medicine" data-testid="med-chips" ${meds.length ? "" : "hidden"}><span class="muted tiny">Given before</span><div class="tabs" id="f-medchips">${chipsHtml()}</div></div>` : ""}
+      <div class="grid2">
+        <div class="field" data-show="medicine"><label for="f-medname">Medicine</label><input id="f-medname" type="text" maxlength="80" autocomplete="off" value="${esc(e?.med_name ?? "")}" /></div>
+        <div class="field" data-show="medicine"><label for="f-meddose">Dose <span class="muted" style="text-transform:none">(e.g. 2.5 ml)</span></label><input id="f-meddose" type="text" maxlength="40" autocomplete="off" value="${esc(e?.med_dose ?? "")}" /></div>
+      </div>
+      ${!e ? `<p class="error" data-show="medicine" data-testid="dose-wait" role="status" hidden></p>` : ""}
+      <div class="field" data-show="medicine"><label for="f-repeat">Next dose no sooner than</label><select id="f-repeat">${repeatOptions(storedRepeat)}</select>
+        <span class="muted tiny">As the label or your doctor says. The log shows when the next dose may be given; it never sends a reminder to give one.</span></div>
       <div class="field"><label for="f-note">Note <span class="muted" style="text-transform:none">(optional)</span></label><textarea id="f-note">${esc(e?.note ?? "")}</textarea></div>
       <div class="error" data-form-error data-testid="modal-error" role="alert" hidden></div>
       <div class="modal-actions">
@@ -1451,14 +1572,81 @@ function openEntryEditor(existing, presetType) {
   };
   applyVisibility();
   modalEl.querySelector("#f-type").addEventListener("change", applyVisibility);
+  // A new dose of a medicine still inside its wait says so, as the log does,
+  // before it is saved. It does not stop the save: a doctor may have said otherwise.
+  const waitLine = modalEl.querySelector("[data-testid=dose-wait]");
+  const showWait = () => {
+    if (!waitLine) return;
+    // As of the Started time on the form, either side of it (see doseWait).
+    const start = new Date(document.getElementById("f-start").value);
+    const chosen = document.getElementById("f-repeat").value;
+    // The dose this form already stored on a try whose answer was lost (its
+    // pinned id) is the one being saved, not one to warn about.
+    const pinned = modalEl.querySelector("#entry-form")?.dataset.rowId ?? null;
+    // Each dose either side it would come too close to, so the check at submit
+    // sees one logged on either side since.
+    const ws = doseWaits(doseLog, currentBabyId, document.getElementById("f-medname").value, Number.isNaN(start.getTime()) ? new Date() : start, chosen === "" ? null : Number(chosen), pinned);
+    waitLine.textContent = ws.map((w) => `Given: ${doseWaitText(w)}.`).join(" ");
+    // Which doses and waits, for the check at submit: the text changes at
+    // midnight, and two doses logged in the same minute read the same.
+    waitLine.dataset.key = ws.map((w) => `${w.id}|${w.notBefore.toISOString()}`).join(" ");
+    waitLine.hidden = !ws.length;
+  };
+  document.getElementById("f-start").addEventListener("change", showWait);
+  document.getElementById("f-repeat").addEventListener("change", showWait);
+  // A new dose carries a wait of its own: a medicine given before (a chip,
+  // or its name typed) fills in the wait its last dose had, unless one was
+  // picked here. A name not given before clears a wait filled for another.
+  let repeatPicked = false;
+  document.getElementById("f-repeat").addEventListener("change", () => { repeatPicked = true; });
+  const fillWait = () => {
+    if (e || repeatPicked) return;
+    const m = knownMedicine(meds, document.getElementById("f-medname").value);
+    document.getElementById("f-repeat").innerHTML = repeatOptions(m?.repeat_after_min ?? null);
+  };
+  document.getElementById("f-medname").addEventListener("input", () => { fillWait(); showWait(); });
+  modalEl.querySelector("#f-medchips")?.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-med-fill]");
+    const m = btn && meds[Number(btn.dataset.medFill)];
+    if (!m) return;
+    document.getElementById("f-medname").value = m.med_name;
+    document.getElementById("f-meddose").value = m.med_dose;
+    fillWait();
+    showWait();
+  });
 
   // The times as the form opened with them. The inputs hold minutes only, so
   // a time left alone keeps the stored one rather than being rewritten from
   // the rounded copy (see saveEntry: only what changed is written).
   const openedStart = document.getElementById("f-start").value;
   const openedEnd = document.getElementById("f-end")?.value ?? "";
-  modalEl.querySelector("#entry-form").addEventListener("submit", (ev) => {
+  // Likewise the reading: one left alone keeps its stored hundredths.
+  const openedTemp = document.getElementById("f-temp").value;
+  modalEl.querySelector("#entry-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
+    const form = ev.currentTarget;
+    // A new dose is judged against the doses as they are now: another
+    // caregiver may have given one since the page read the log. One inside a
+    // wait the form has not shown yet is shown first; pressing again saves it.
+    // Read before any field is taken, so what is judged is what is saved.
+    // Offline, the doses the form has are all there is to judge by.
+    if (waitLine && document.getElementById("f-type").value === "medicine") {
+      const shown = new Set(waitLine.hidden ? [] : waitLine.dataset.key.split(" "));
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn) btn.disabled = true;
+      doseLog = DB ? await readDoses().catch(() => doseLog) : doseLog;
+      if (btn) btn.disabled = false;
+      if (!modalEl?.contains(form)) return;
+      meds = recentMedicines(doseLog, currentBabyId);
+      document.getElementById("f-medchips").innerHTML = chipsHtml();
+      modalEl.querySelector("[data-testid=med-chips]").hidden = !meds.length;
+      // The wait is saved as the form shows it: the read holds only the newest
+      // doses, and is no reason to change a wait already filled in.
+      showWait();
+      // Only while it is still a dose: a type changed during the read saves as it is.
+      const unseen = waitLine.dataset.key.split(" ").some((k) => k && !shown.has(k));
+      if (document.getElementById("f-type").value === "medicine" && !waitLine.hidden && unseen) return;
+    }
     const entryType = document.getElementById("f-type").value;
     const startRaw = document.getElementById("f-start").value;
     if (!startRaw) { document.getElementById("f-start").focus(); return; }
@@ -1467,7 +1655,7 @@ function openEntryEditor(existing, presetType) {
     const amountRaw = document.getElementById("f-amount")?.value ?? "";
     const amount = ["feed", "pump"].includes(entryType) && amountRaw !== "" ? Number(amountRaw) : null;
     // Said in the form's own error line: the page's line is under the overlay.
-    const line = ev.currentTarget.querySelector("[data-form-error]");
+    const line = form.querySelector("[data-form-error]");
     const start = new Date(startRaw);
     const end = showsEnd && endRaw ? new Date(endRaw) : null;
     // toISOString throws on a date it could not parse.
@@ -1475,6 +1663,21 @@ function openEntryEditor(existing, presetType) {
     const startedAt = e && startRaw === openedStart ? e.started_at : start.toISOString();
     const endedAt = e && showsEnd && e.entry_type === entryType && endRaw === openedEnd ? (e.ended_at || null) : (end ? end.toISOString() : null);
     if (endedAt && endedAt < startedAt) { line.textContent = "End time is before start time."; line.hidden = false; return; }
+    const tempRaw = document.getElementById("f-temp").value;
+    // A reading left alone keeps its stored value and is not judged again: a
+    // stored one the form cannot hold must not block a fix to the note or time.
+    const tempKept = !!e && e.entry_type === "temperature" && tempRaw === openedTemp;
+    const tempC100 = entryType !== "temperature" ? null : tempKept ? e.temp_c100 : tempC100From(tempRaw, units);
+    const repeatRaw = document.getElementById("f-repeat").value;
+    const med = entryType !== "medicine" ? { med_name: "", med_dose: "", repeat_after_min: null } : {
+      med_name: document.getElementById("f-medname").value.trim(),
+      med_dose: document.getElementById("f-meddose").value.trim(),
+      // A stored wait the list cannot show (written some other way) is kept
+      // unless the wait was changed here.
+      repeat_after_min: e && e.entry_type === "medicine" && !repeatPicked ? (e.repeat_after_min ?? null) : repeatRaw === "" ? null : Number(repeatRaw),
+    };
+    const invalid = entryType === "temperature" ? (tempKept ? "" : tempError(tempC100)) : entryType === "medicine" ? medicineError(med) : "";
+    if (invalid) { line.textContent = invalid; line.hidden = false; return; }
     line.hidden = true;
     const btn = modalEl?.querySelector('button[type="submit"]');
     if (btn) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.textContent = "Saving…"; }
@@ -1485,8 +1688,11 @@ function openEntryEditor(existing, presetType) {
       amount_ml: Number.isFinite(amount) ? amount : null,
       feed_kind: entryType === "feed" ? document.getElementById("f-feedkind").value : "",
       diaper_kind: entryType === "diaper" ? document.getElementById("f-diaperkind").value : "",
+      temp_c100: tempC100,
+      temp_method: entryType === "temperature" ? document.getElementById("f-method").value : "",
+      ...med,
       note: document.getElementById("f-note").value.trim(),
-    }, e?.id ?? null, ev.currentTarget.dataset, e).catch((err) => saveFailed(err, { action: "save the entry", thing: "entry" }));
+    }, e?.id ?? null, form.dataset, e).catch((err) => saveFailed(err, { action: "save the entry", thing: "entry" }));
   });
 }
 
@@ -1537,6 +1743,16 @@ document.addEventListener("click", (e) => {
     if (q === "more") { openEntryEditor(null, "note"); return; }
     openEntryEditor(null, q);
   }
+});
+
+// Back to a page left open (a phone unlocked, a tab switched to): read the log
+// again, so the health line shows a dose another caregiver gave meanwhile.
+document.addEventListener("visibilitychange", () => {
+  // Not again within half a minute: flipping between apps would read the
+  // whole log, and have the hub open every row, each time.
+  if (document.visibilityState !== "visible" || loadFailed || !babies.length || Date.now() - lastReadAt < 30000) return;
+  lastReadAt = Date.now();   // tried, whether or not it lands
+  rereadEntries().catch((err) => console.error(err));
 });
 
 refresh();

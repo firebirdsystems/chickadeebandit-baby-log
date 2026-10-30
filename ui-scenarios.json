@@ -127,6 +127,259 @@
           "count": 0
         }
       ]
+    },
+    {
+      "name": "the nanny gives a medicine and the parent's log says when the next dose may be given; a temperature typed in the wrong units is refused, and a fever is marked; a repeat dose is one tap on the medicine given before, and the form shows the wait it is still inside; the one-tap Sleep button still starts a nap; a dose the nanny logs while the parent's form is open is shown before the parent's saves",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest"
+      },
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2026-01-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "open",
+          "as": "nanny"
+        },
+        {
+          "action": "expectCount",
+          "as": "nanny",
+          "selector": "[data-testid=\"health-line\"]",
+          "count": 0
+        },
+        {
+          "action": "click",
+          "as": "nanny",
+          "selector": "[data-quick=\"medicine\"]"
+        },
+        {
+          "action": "fill",
+          "as": "nanny",
+          "selector": "#f-medname",
+          "value": "Infant Tylenol"
+        },
+        {
+          "action": "fill",
+          "as": "nanny",
+          "selector": "#f-meddose",
+          "value": "2.5 ml"
+        },
+        {
+          "action": "select",
+          "as": "nanny",
+          "selector": "#f-repeat",
+          "value": "240"
+        },
+        {
+          "action": "click",
+          "as": "nanny",
+          "selector": "#entry-form button[type=\"submit\"]"
+        },
+        {
+          "action": "expectText",
+          "as": "nanny",
+          "selector": "[data-testid=\"health-line\"]",
+          "text": "Infant Tylenol 2.5 ml at"
+        },
+        {
+          "action": "open",
+          "as": "parent"
+        },
+        {
+          "action": "expectText",
+          "as": "parent",
+          "selector": "[data-testid=\"health-line\"]",
+          "text": "not again before"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-view=\"growth\"]"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-units=\"metric\"]"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-view=\"log\"]"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-quick=\"temperature\"]"
+        },
+        {
+          "action": "fill",
+          "as": "parent",
+          "selector": "#f-temp",
+          "value": "101.2"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "#entry-form button[type=\"submit\"]"
+        },
+        {
+          "action": "expectText",
+          "as": "parent",
+          "selector": "[data-testid=\"modal-error\"]",
+          "text": "looks wrong"
+        },
+        {
+          "action": "fill",
+          "as": "parent",
+          "selector": "#f-temp",
+          "value": "38.6"
+        },
+        {
+          "action": "select",
+          "as": "parent",
+          "selector": "#f-method",
+          "value": "armpit"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "#entry-form button[type=\"submit\"]"
+        },
+        {
+          "action": "expectText",
+          "as": "parent",
+          "selector": "[data-testid=\"health-line\"]",
+          "text": "Last temperature 38.6 °C, fever"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-quick=\"medicine\"]"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-med-fill=\"0\"]"
+        },
+        {
+          "action": "expectCount",
+          "as": "parent",
+          "selector": "#f-repeat option:checked[value=\"240\"]",
+          "count": 1
+        },
+        {
+          "action": "expectText",
+          "as": "parent",
+          "selector": "[data-testid=\"dose-wait\"]",
+          "text": "not again before"
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "#entry-form button[type=\"submit\"]"
+        },
+        {
+          "action": "expectCount",
+          "as": "parent",
+          "selector": ".entry-title:has-text(\"Medicine\")",
+          "count": 2
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-quick=\"medicine\"]"
+        },
+        {
+          "action": "fill",
+          "as": "parent",
+          "selector": "#f-medname",
+          "value": "Saline drops"
+        },
+        {
+          "action": "expectCount",
+          "as": "parent",
+          "selector": "#f-repeat option:checked[value=\"\"]",
+          "count": 1
+        },
+        {
+          "action": "click",
+          "as": "nanny",
+          "selector": "[data-quick=\"medicine\"]"
+        },
+        {
+          "action": "fill",
+          "as": "nanny",
+          "selector": "#f-medname",
+          "value": "Saline drops"
+        },
+        {
+          "action": "select",
+          "as": "nanny",
+          "selector": "#f-repeat",
+          "value": "240"
+        },
+        {
+          "action": "click",
+          "as": "nanny",
+          "selector": "#entry-form button[type=\"submit\"]"
+        },
+        {
+          "action": "expectCount",
+          "as": "nanny",
+          "selector": "#entry-form",
+          "count": 0
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "#entry-form button[type=\"submit\"]"
+        },
+        {
+          "action": "expectText",
+          "as": "parent",
+          "selector": "[data-testid=\"dose-wait\"]",
+          "text": "not again before"
+        },
+        {
+          "action": "expectCount",
+          "as": "parent",
+          "selector": "#f-repeat option:checked[value=\"\"]",
+          "count": 1
+        },
+        {
+          "action": "expectCount",
+          "as": "parent",
+          "selector": "#entry-form",
+          "count": 1
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "#entry-form button[type=\"submit\"]"
+        },
+        {
+          "action": "expectCount",
+          "as": "parent",
+          "selector": "#entry-form",
+          "count": 0
+        },
+        {
+          "action": "click",
+          "as": "parent",
+          "selector": "[data-quick=\"sleep\"]"
+        },
+        {
+          "action": "expectText",
+          "as": "parent",
+          "selector": "[data-quick=\"sleep\"]",
+          "text": "End sleep"
+        }
+      ]
     }
   ]
 }

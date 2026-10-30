@@ -141,9 +141,9 @@ describe("manifest: growth and the report", () => {
   it("the kinds the summary counts in SQL are plaintext", () => {
     expect(manifest.db_plaintext_columns).toEqual(expect.arrayContaining(["feed_kind", "diaper_kind"]));
   });
-  it("declares the summary, the entry list and growth, each over a household-day range", () => {
+  it("declares the summary, the entry list, temperatures and medicines, and growth, each over a household-day range", () => {
     const views = manifest.reports.views;
-    expect(views.map((v) => v.id)).toEqual(["daily_summary", "entries", "growth"]);
+    expect(views.map((v) => v.id)).toEqual(["daily_summary", "entries", "temperatures_medicines", "growth"]);
     for (const v of views) {
       expect(v.source.query, v.id).toMatch(/:range_start/);
       expect(v.source.query, v.id).toMatch(/:range_end/);
@@ -151,7 +151,7 @@ describe("manifest: growth and the report", () => {
       expect(v.columns.length, v.id).toBeLessThanOrEqual(12);
     }
     // Entries are dated by the household's day, falling back to UTC only for those from before local_at.
-    for (const id of ["daily_summary", "entries"]) {
+    for (const id of ["daily_summary", "entries", "temperatures_medicines"]) {
       expect(views.find((v) => v.id === id).source.query).toContain("substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN :range_start AND :range_end");
     }
   });

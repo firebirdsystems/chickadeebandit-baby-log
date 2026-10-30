@@ -913,7 +913,7 @@
       ]
     },
     {
-      "name": "the report's three views run through the governed read: the summary counts each day on the household's calendar, the entry list prints the household's time, growth converts units",
+      "name": "the report's views run through the governed read: the summary counts each day on the household's calendar, the entry list prints the household's time, growth converts units",
       "members": {
         "parent": "adult"
       },
@@ -1042,7 +1042,7 @@
         {
           "action": "db",
           "as": "parent",
-          "sql": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'feed' THEN 'Feed' WHEN 'diaper' THEN 'Diaper' WHEN 'sleep' THEN 'Sleep' WHEN 'pump' THEN 'Pumping' WHEN 'note' THEN 'Note' ELSE e.entry_type END AS kind, CASE e.entry_type WHEN 'feed' THEN CASE e.feed_kind WHEN 'bottle' THEN 'Bottle' WHEN 'nurse-left' THEN 'Breast, left' WHEN 'nurse-right' THEN 'Breast, right' WHEN 'solids' THEN 'Solids' ELSE e.feed_kind END WHEN 'diaper' THEN CASE e.diaper_kind WHEN 'wet' THEN 'Wet' WHEN 'dirty' THEN 'Dirty' WHEN 'both' THEN 'Wet and dirty' ELSE e.diaper_kind END ELSE '' END AS detail, e.amount_ml AS amount_ml, CASE WHEN e.ended_at > e.started_at THEN CAST(ROUND((julianday(e.ended_at) - julianday(e.started_at)) * 1440) AS INTEGER) END AS minutes, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN '2026-01-01' AND '2026-01-31' ORDER BY b.created_at, b.id, e.started_at DESC, e.id",
+          "sql": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'feed' THEN 'Feed' WHEN 'diaper' THEN 'Diaper' WHEN 'sleep' THEN 'Sleep' WHEN 'pump' THEN 'Pumping' WHEN 'temperature' THEN 'Temperature' WHEN 'medicine' THEN 'Medicine' WHEN 'note' THEN 'Note' ELSE e.entry_type END AS kind, CASE e.entry_type WHEN 'feed' THEN CASE e.feed_kind WHEN 'bottle' THEN 'Bottle' WHEN 'nurse-left' THEN 'Breast, left' WHEN 'nurse-right' THEN 'Breast, right' WHEN 'solids' THEN 'Solids' ELSE e.feed_kind END WHEN 'diaper' THEN CASE e.diaper_kind WHEN 'wet' THEN 'Wet' WHEN 'dirty' THEN 'Dirty' WHEN 'both' THEN 'Wet and dirty' ELSE e.diaper_kind END WHEN 'temperature' THEN CASE WHEN e.temp_c100 IS NULL THEN '' ELSE printf('%.1f °C / %.1f °F', e.temp_c100 / 100.0, e.temp_c100 * 9 / 500.0 + 32) || CASE WHEN e.temp_c100 >= 3800 THEN ', fever' ELSE '' END || CASE WHEN e.temp_method = '' THEN '' ELSE ', ' || CASE e.temp_method WHEN 'rectal' THEN 'Rectal' WHEN 'armpit' THEN 'Armpit' WHEN 'ear' THEN 'Ear' WHEN 'forehead' THEN 'Forehead' WHEN 'mouth' THEN 'Mouth' ELSE e.temp_method END END END ELSE '' END AS detail, e.amount_ml AS amount_ml, e.med_name AS medicine, e.med_dose AS dose, CASE WHEN e.ended_at > e.started_at THEN CAST(ROUND((julianday(e.ended_at) - julianday(e.started_at)) * 1440) AS INTEGER) END AS minutes, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN '2026-01-01' AND '2026-01-31' ORDER BY b.created_at, b.id, e.started_at DESC, e.id",
           "expect": {
             "status": 200,
             "rowCount": 3,
@@ -1467,6 +1467,320 @@
                 "ended_at": "2026-01-05T14:30:00.000Z"
               }
             ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "temperatures and medicines: a guest nanny logs a reading and a dose under their own stamped name whatever member they claim; the dose's name and amount read back for every member; how a reading was taken filters in SQL; a parent corrects a dose; the entry list and the sick-visit view print both at the household's time",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest",
+        "sibling": "child"
+      },
+      "granted": [
+        "nanny"
+      ],
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "t1",
+            "b1",
+            "temperature",
+            "2026-01-06T02:05:00.000Z",
+            "2026-01-05T21:05",
+            null,
+            null,
+            "",
+            "",
+            3844,
+            "rectal",
+            "",
+            "",
+            null,
+            "",
+            "{{parent}}",
+            "Sam",
+            "2026-01-06T02:05:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "params": [
+            "m1",
+            "b1",
+            "medicine",
+            "2026-01-06T02:10:00.000Z",
+            "2026-01-05T21:10",
+            null,
+            null,
+            "",
+            "",
+            null,
+            "",
+            "Infant Tylenol",
+            "2.5 ml",
+            240,
+            "",
+            "{{parent}}",
+            "Sam",
+            "2026-01-06T02:10:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, entry_type, temp_c100, temp_method, med_name, med_dose, repeat_after_min FROM app_baby_log__entries WHERE created_by = ? ORDER BY started_at",
+          "expect": {
+            "status": 200,
+            "rowCount": 2,
+            "rowsContain": [
+              {
+                "id": "t1",
+                "entry_type": "temperature",
+                "temp_c100": 3844,
+                "temp_method": "rectal",
+                "med_name": ""
+              },
+              {
+                "id": "m1",
+                "entry_type": "medicine",
+                "temp_c100": null,
+                "med_name": "Infant Tylenol",
+                "med_dose": "2.5 ml",
+                "repeat_after_min": 240
+              }
+            ]
+          },
+          "params": [
+            "{{nanny}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "sibling",
+          "sql": "SELECT id, med_name FROM app_baby_log__entries WHERE entry_type = 'medicine'",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "m1",
+                "med_name": "Infant Tylenol"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__entries WHERE temp_method = 'rectal'",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "t1"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "UPDATE app_baby_log__entries SET med_dose = ?, repeat_after_min = ? WHERE id = ?",
+          "params": [
+            "3.75 ml",
+            360,
+            "m1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "SELECT med_dose, repeat_after_min FROM app_baby_log__entries WHERE id = 'm1' AND created_by = ?",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "med_dose": "3.75 ml",
+                "repeat_after_min": 360
+              }
+            ]
+          },
+          "params": [
+            "{{nanny}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "DELETE FROM app_baby_log__entries WHERE id = 'm1'",
+          "expect": {
+            "status": 403
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'feed' THEN 'Feed' WHEN 'diaper' THEN 'Diaper' WHEN 'sleep' THEN 'Sleep' WHEN 'pump' THEN 'Pumping' WHEN 'temperature' THEN 'Temperature' WHEN 'medicine' THEN 'Medicine' WHEN 'note' THEN 'Note' ELSE e.entry_type END AS kind, CASE e.entry_type WHEN 'feed' THEN CASE e.feed_kind WHEN 'bottle' THEN 'Bottle' WHEN 'nurse-left' THEN 'Breast, left' WHEN 'nurse-right' THEN 'Breast, right' WHEN 'solids' THEN 'Solids' ELSE e.feed_kind END WHEN 'diaper' THEN CASE e.diaper_kind WHEN 'wet' THEN 'Wet' WHEN 'dirty' THEN 'Dirty' WHEN 'both' THEN 'Wet and dirty' ELSE e.diaper_kind END WHEN 'temperature' THEN CASE WHEN e.temp_c100 IS NULL THEN '' ELSE printf('%.1f °C / %.1f °F', e.temp_c100 / 100.0, e.temp_c100 * 9 / 500.0 + 32) || CASE WHEN e.temp_c100 >= 3800 THEN ', fever' ELSE '' END || CASE WHEN e.temp_method = '' THEN '' ELSE ', ' || CASE e.temp_method WHEN 'rectal' THEN 'Rectal' WHEN 'armpit' THEN 'Armpit' WHEN 'ear' THEN 'Ear' WHEN 'forehead' THEN 'Forehead' WHEN 'mouth' THEN 'Mouth' ELSE e.temp_method END END END ELSE '' END AS detail, e.amount_ml AS amount_ml, e.med_name AS medicine, e.med_dose AS dose, CASE WHEN e.ended_at > e.started_at THEN CAST(ROUND((julianday(e.ended_at) - julianday(e.started_at)) * 1440) AS INTEGER) END AS minutes, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN '2026-01-01' AND '2026-01-31' ORDER BY b.created_at, b.id, e.started_at DESC, e.id",
+          "expect": {
+            "status": 200,
+            "rowCount": 2,
+            "rowsContain": [
+              {
+                "at_time": "2026-01-05T21:05",
+                "kind": "Temperature",
+                "detail": "38.4 °C / 101.2 °F, fever, Rectal",
+                "medicine": "",
+                "who": "Sam"
+              },
+              {
+                "at_time": "2026-01-05T21:10",
+                "kind": "Medicine",
+                "detail": "",
+                "medicine": "Infant Tylenol",
+                "dose": "3.75 ml"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'temperature' THEN 'Temperature' ELSE 'Medicine' END AS kind, CASE WHEN e.entry_type = 'temperature' AND e.temp_c100 IS NOT NULL THEN printf('%.1f', e.temp_c100 / 100.0) END AS temp_c, CASE WHEN e.entry_type = 'temperature' AND e.temp_c100 IS NOT NULL THEN printf('%.1f', e.temp_c100 * 9 / 500.0 + 32) END AS temp_f, CASE WHEN e.entry_type = 'temperature' AND e.temp_c100 >= 3800 THEN 'Yes' ELSE '' END AS fever, CASE e.temp_method WHEN 'rectal' THEN 'Rectal' WHEN 'armpit' THEN 'Armpit' WHEN 'ear' THEN 'Ear' WHEN 'forehead' THEN 'Forehead' WHEN 'mouth' THEN 'Mouth' ELSE e.temp_method END AS taken, e.med_name AS medicine, e.med_dose AS dose, CASE WHEN e.entry_type = 'medicine' AND e.repeat_after_min > 0 THEN CASE WHEN e.repeat_after_min < 60 THEN printf('%d min', e.repeat_after_min) WHEN e.repeat_after_min % 60 = 0 THEN printf('%d h', e.repeat_after_min / 60) ELSE printf('%d h %d min', e.repeat_after_min / 60, e.repeat_after_min % 60) END END AS wait, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND e.entry_type IN ('temperature', 'medicine') AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN '2026-01-01' AND '2026-01-31' ORDER BY b.created_at, b.id, e.started_at DESC, e.id",
+          "expect": {
+            "status": 200,
+            "rowCount": 2,
+            "rowsContain": [
+              {
+                "child": "Juniper",
+                "kind": "Temperature",
+                "temp_c": "38.4",
+                "temp_f": "101.2",
+                "fever": "Yes",
+                "taken": "Rectal",
+                "medicine": "",
+                "wait": null
+              },
+              {
+                "child": "Juniper",
+                "kind": "Medicine",
+                "temp_c": null,
+                "fever": "",
+                "medicine": "Infant Tylenol",
+                "dose": "3.75 ml",
+                "wait": "6 h",
+                "who": "Sam"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Siri logs a temperature for a guest nanny with the reading bound as text, as the native write sends every parameter: it is stored as the number, stamped with the nanny, and a replay of the same id adds nothing",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest"
+      },
+      "granted": [
+        "nanny"
+      ],
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, temp_c100, temp_method, created_by, created_by_name, created_at) VALUES (?, ?, 'temperature', ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+          "params": [
+            "siri-t1",
+            "b1",
+            "2026-01-05T13:00:00.000Z",
+            "2026-01-05T06:00",
+            "3844",
+            "",
+            "{{parent}}",
+            "Sam",
+            "2026-01-05T13:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, temp_c100, temp_method, created_by, created_by_name, created_at) VALUES (?, ?, 'temperature', ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+          "params": [
+            "siri-t1",
+            "b1",
+            "2026-01-05T13:00:00.000Z",
+            "2026-01-05T06:00",
+            "3844",
+            "",
+            "{{parent}}",
+            "Sam",
+            "2026-01-05T13:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, temp_c100, typeof(temp_c100) AS stored_as FROM app_baby_log__entries WHERE created_by = ?",
+          "params": [
+            "{{nanny}}"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "siri-t1",
+                "temp_c100": 3844,
+                "stored_as": "integer"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__entries WHERE entry_type = 'temperature' AND temp_c100 >= 3800",
+          "expect": {
+            "status": 200,
+            "rowCount": 1
           }
         }
       ]

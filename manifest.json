@@ -6,7 +6,7 @@
   ],
   "name": "Baby Log",
   "version": "1.0.0",
-  "description": "Track feeds, diapers, naps, pumping and growth for your baby — quick one-tap logging, a running sleep timer, feed and wake-window reminders, a daily summary every caregiver can see, growth charts with WHO percentiles, a report to take to the pediatrician, and a shift log for the nanny.",
+  "description": "Track feeds, diapers, naps, pumping, temperatures, medicines and growth for your baby — quick one-tap logging, a running sleep timer, feed and wake-window reminders, when the next dose of a medicine may be given, a daily summary every caregiver can see, growth charts with WHO percentiles, a report to take to the pediatrician, and a shift log for the nanny.",
   "entrypoint": "index.html",
   "runtime": "static",
   "category": "family",
@@ -20,7 +20,10 @@
     "nanny",
     "caregiver",
     "growth",
-    "pediatrician"
+    "pediatrician",
+    "temperature",
+    "medicine",
+    "fever"
   ],
   "icon": "🍼",
   "data_access": {
@@ -42,10 +45,13 @@
       "sql": "SELECT id, name, birth_date, sex, emoji, archived, feed_interval_min, wake_window_min, max_nap_min, created_by, created_at FROM app_baby_log__babies WHERE archived = 0 ORDER BY created_at"
     },
     "entries": {
-      "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"
+      "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at FROM app_baby_log__entries ORDER BY started_at DESC LIMIT 400"
     },
     "running_sleeps": {
-      "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, note, created_by, created_by_name, created_at FROM app_baby_log__entries WHERE entry_type = 'sleep' AND (ended_at IS NULL OR ended_at = '')"
+      "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at FROM app_baby_log__entries WHERE entry_type = 'sleep' AND (ended_at IS NULL OR ended_at = '')"
+    },
+    "medicines": {
+      "sql": "SELECT id, baby_id, entry_type, started_at, ended_at, amount_ml, feed_kind, diaper_kind, temp_c100, temp_method, med_name, med_dose, repeat_after_min, note, created_by, created_by_name, created_at FROM app_baby_log__entries WHERE entry_type = 'medicine' ORDER BY started_at DESC LIMIT 200"
     },
     "shifts": {
       "sql": "SELECT id, member_id, member_name, started_at, ended_at, shift_date, summary, handoff, created_at, updated_at FROM app_baby_log__shifts WHERE ended_at = '' OR started_at >= date(?, '-30 days') ORDER BY started_at DESC, id DESC",
@@ -62,7 +68,9 @@
     "birth_date",
     "feed_kind",
     "diaper_kind",
-    "archived"
+    "archived",
+    "temp_method",
+    "temp_c100"
   ],
   "row_policies": {
     "babies": {
@@ -299,7 +307,7 @@
       {
         "id": "daily_summary",
         "title": "Daily summary",
-        "description": "Each day's feeds, diapers, sleep and pumping for each child, on the household's calendar. Sleep is counted on the day the nap or night began, and only once it has ended. A blank count means some of that day's entries do not say which kind they were.",
+        "description": "Each day's feeds, diapers, sleep and pumping for each child, on the household's calendar. Sleep is counted on the day the nap or night began, and only once it has ended. A blank count means some of that day's entries do not say which kind they were. Temperatures and medicines have their own view.",
         "source": {
           "kind": "sql",
           "query": "SELECT b.name AS child, substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) AS day, SUM(e.entry_type = 'feed') AS feeds, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind IN ('nurse-left','nurse-right')) END AS breast, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind = 'bottle') END AS bottles, CASE WHEN SUM(e.entry_type = 'feed') > SUM(e.feed_kind IN ('bottle','nurse-left','nurse-right','solids')) THEN NULL ELSE SUM(e.feed_kind = 'solids') END AS solids, SUM(CASE WHEN e.entry_type = 'feed' THEN e.amount_ml END) AS fed_ml, SUM(e.entry_type = 'diaper') AS diapers, CASE WHEN SUM(e.entry_type = 'diaper') > SUM(e.diaper_kind IN ('wet','dirty','both')) THEN NULL ELSE SUM(e.diaper_kind IN ('wet','both')) END AS wet, CASE WHEN SUM(e.entry_type = 'diaper') > SUM(e.diaper_kind IN ('wet','dirty','both')) THEN NULL ELSE SUM(e.diaper_kind IN ('dirty','both')) END AS dirty, CASE WHEN SUM(CASE WHEN e.entry_type = 'sleep' AND e.ended_at > e.started_at THEN julianday(e.ended_at) - julianday(e.started_at) END) IS NULL THEN NULL ELSE printf('%.1f', SUM(CASE WHEN e.entry_type = 'sleep' AND e.ended_at > e.started_at THEN julianday(e.ended_at) - julianday(e.started_at) END) * 24) END AS sleep_hours, SUM(CASE WHEN e.entry_type = 'pump' THEN e.amount_ml END) AS pumped_ml FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN :range_start AND :range_end GROUP BY b.id, day ORDER BY b.created_at, b.id, day DESC"
@@ -359,10 +367,10 @@
       {
         "id": "entries",
         "title": "Every entry",
-        "description": "Every feed, diaper, nap, pumping and note logged for each child, newest first, at the household's local time, with who logged it.",
+        "description": "Every feed, diaper, nap, pumping, temperature, medicine and note logged for each child, newest first, at the household's local time, with who logged it.",
         "source": {
           "kind": "sql",
-          "query": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'feed' THEN 'Feed' WHEN 'diaper' THEN 'Diaper' WHEN 'sleep' THEN 'Sleep' WHEN 'pump' THEN 'Pumping' WHEN 'note' THEN 'Note' ELSE e.entry_type END AS kind, CASE e.entry_type WHEN 'feed' THEN CASE e.feed_kind WHEN 'bottle' THEN 'Bottle' WHEN 'nurse-left' THEN 'Breast, left' WHEN 'nurse-right' THEN 'Breast, right' WHEN 'solids' THEN 'Solids' ELSE e.feed_kind END WHEN 'diaper' THEN CASE e.diaper_kind WHEN 'wet' THEN 'Wet' WHEN 'dirty' THEN 'Dirty' WHEN 'both' THEN 'Wet and dirty' ELSE e.diaper_kind END ELSE '' END AS detail, e.amount_ml AS amount_ml, CASE WHEN e.ended_at > e.started_at THEN CAST(ROUND((julianday(e.ended_at) - julianday(e.started_at)) * 1440) AS INTEGER) END AS minutes, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN :range_start AND :range_end ORDER BY b.created_at, b.id, e.started_at DESC, e.id"
+          "query": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'feed' THEN 'Feed' WHEN 'diaper' THEN 'Diaper' WHEN 'sleep' THEN 'Sleep' WHEN 'pump' THEN 'Pumping' WHEN 'temperature' THEN 'Temperature' WHEN 'medicine' THEN 'Medicine' WHEN 'note' THEN 'Note' ELSE e.entry_type END AS kind, CASE e.entry_type WHEN 'feed' THEN CASE e.feed_kind WHEN 'bottle' THEN 'Bottle' WHEN 'nurse-left' THEN 'Breast, left' WHEN 'nurse-right' THEN 'Breast, right' WHEN 'solids' THEN 'Solids' ELSE e.feed_kind END WHEN 'diaper' THEN CASE e.diaper_kind WHEN 'wet' THEN 'Wet' WHEN 'dirty' THEN 'Dirty' WHEN 'both' THEN 'Wet and dirty' ELSE e.diaper_kind END WHEN 'temperature' THEN CASE WHEN e.temp_c100 IS NULL THEN '' ELSE printf('%.1f °C / %.1f °F', e.temp_c100 / 100.0, e.temp_c100 * 9 / 500.0 + 32) || CASE WHEN e.temp_c100 >= 3800 THEN ', fever' ELSE '' END || CASE WHEN e.temp_method = '' THEN '' ELSE ', ' || CASE e.temp_method WHEN 'rectal' THEN 'Rectal' WHEN 'armpit' THEN 'Armpit' WHEN 'ear' THEN 'Ear' WHEN 'forehead' THEN 'Forehead' WHEN 'mouth' THEN 'Mouth' ELSE e.temp_method END END END ELSE '' END AS detail, e.amount_ml AS amount_ml, e.med_name AS medicine, e.med_dose AS dose, CASE WHEN e.ended_at > e.started_at THEN CAST(ROUND((julianday(e.ended_at) - julianday(e.started_at)) * 1440) AS INTEGER) END AS minutes, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN :range_start AND :range_end ORDER BY b.created_at, b.id, e.started_at DESC, e.id"
         },
         "columns": [
           {
@@ -387,8 +395,77 @@
             "label": "Amount (ml)"
           },
           {
+            "key": "medicine",
+            "label": "Medicine"
+          },
+          {
+            "key": "dose",
+            "label": "Dose"
+          },
+          {
             "key": "minutes",
             "label": "Minutes"
+          },
+          {
+            "key": "note",
+            "label": "Note"
+          },
+          {
+            "key": "who",
+            "label": "Logged by",
+            "format": "member"
+          }
+        ]
+      },
+      {
+        "id": "temperatures_medicines",
+        "title": "Temperatures and medicines",
+        "description": "Every temperature taken and every medicine dose given for each child, newest first, at the household's local time, with who logged it — for a sick visit. A temperature of 38.0 °C (100.4 °F) or more is marked as a fever. The wait is how long the person giving the dose said to leave before the next one.",
+        "source": {
+          "kind": "sql",
+          "query": "SELECT b.name AS child, COALESCE(NULLIF(e.local_at, ''), e.started_at) AS at_time, CASE e.entry_type WHEN 'temperature' THEN 'Temperature' ELSE 'Medicine' END AS kind, CASE WHEN e.entry_type = 'temperature' AND e.temp_c100 IS NOT NULL THEN printf('%.1f', e.temp_c100 / 100.0) END AS temp_c, CASE WHEN e.entry_type = 'temperature' AND e.temp_c100 IS NOT NULL THEN printf('%.1f', e.temp_c100 * 9 / 500.0 + 32) END AS temp_f, CASE WHEN e.entry_type = 'temperature' AND e.temp_c100 >= 3800 THEN 'Yes' ELSE '' END AS fever, CASE e.temp_method WHEN 'rectal' THEN 'Rectal' WHEN 'armpit' THEN 'Armpit' WHEN 'ear' THEN 'Ear' WHEN 'forehead' THEN 'Forehead' WHEN 'mouth' THEN 'Mouth' ELSE e.temp_method END AS taken, e.med_name AS medicine, e.med_dose AS dose, CASE WHEN e.entry_type = 'medicine' AND e.repeat_after_min > 0 THEN CASE WHEN e.repeat_after_min < 60 THEN printf('%d min', e.repeat_after_min) WHEN e.repeat_after_min % 60 = 0 THEN printf('%d h', e.repeat_after_min / 60) ELSE printf('%d h %d min', e.repeat_after_min / 60, e.repeat_after_min % 60) END END AS wait, e.note AS note, CASE WHEN e.created_by_name = '' THEN e.created_by ELSE e.created_by_name END AS who FROM app_baby_log__entries e JOIN app_baby_log__babies b ON b.id = e.baby_id WHERE b.archived = 0 AND e.entry_type IN ('temperature', 'medicine') AND substr(COALESCE(NULLIF(e.local_at, ''), e.started_at), 1, 10) BETWEEN :range_start AND :range_end ORDER BY b.created_at, b.id, e.started_at DESC, e.id"
+        },
+        "columns": [
+          {
+            "key": "child",
+            "label": "Child"
+          },
+          {
+            "key": "at_time",
+            "label": "When",
+            "format": "datetime"
+          },
+          {
+            "key": "kind",
+            "label": "Kind"
+          },
+          {
+            "key": "temp_c",
+            "label": "Temp (°C)"
+          },
+          {
+            "key": "temp_f",
+            "label": "Temp (°F)"
+          },
+          {
+            "key": "fever",
+            "label": "Fever"
+          },
+          {
+            "key": "taken",
+            "label": "Taken"
+          },
+          {
+            "key": "medicine",
+            "label": "Medicine"
+          },
+          {
+            "key": "dose",
+            "label": "Dose"
+          },
+          {
+            "key": "wait",
+            "label": "Next dose no sooner than"
           },
           {
             "key": "note",

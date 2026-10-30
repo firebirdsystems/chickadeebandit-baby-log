@@ -10,6 +10,8 @@ export const ENTRY_TYPES = [
   { value: "diaper", label: "Diaper", glyph: "diaper" },
   { value: "sleep",  label: "Sleep",  glyph: "moon" },
   { value: "pump",   label: "Pump",   glyph: "jar" },
+  { value: "temperature", label: "Temperature", glyph: "thermometer" },
+  { value: "medicine", label: "Medicine", glyph: "pill" },
   { value: "note",   label: "Note",   glyph: "note" },
 ];
 
@@ -119,8 +121,8 @@ export function ageLabel(birthDate, now = new Date()) {
   return `${years} years`;
 }
 
-/** One-line detail string for a timeline entry. */
-export function entryDetail(e) {
+/** One-line detail string for a timeline entry; a temperature in `units`. */
+export function entryDetail(e, units = "metric") {
   const bits = [];
   if (e.entry_type === "feed") {
     if (e.feed_kind) bits.push(feedKindLabel(e.feed_kind));
@@ -129,6 +131,13 @@ export function entryDetail(e) {
     if (e.amount_ml != null && e.amount_ml !== "") bits.push(`${e.amount_ml} ml`);
   } else if (e.entry_type === "diaper") {
     if (e.diaper_kind) bits.push(diaperKindLabel(e.diaper_kind));
+  } else if (e.entry_type === "temperature") {
+    const temp = fmtTemp(e.temp_c100, units);
+    if (temp) bits.push(isFever(e.temp_c100, units) ? `${temp}, fever` : temp);
+    if (e.temp_method) bits.push(tempMethodLabel(e.temp_method));
+  } else if (e.entry_type === "medicine") {
+    if (e.med_name) bits.push(e.med_name);
+    if (e.med_dose) bits.push(e.med_dose);
   } else if (e.entry_type === "sleep") {
     if (e.ended_at) {
       bits.push(fmtDuration(new Date(e.ended_at) - new Date(e.started_at)));
@@ -153,10 +162,14 @@ export function diaperKindLabel(kind) {
  * Fields the in-app search matches against (see hub-sdk `searchMatch`).
  * The note is where anything unusual gets written ("spat up after the
  * bottle"), and that is what gets looked for later — often to repeat it
- * to a doctor. Entry/feed/diaper kinds are matchable too.
+ * to a doctor. Entry/feed/diaper kinds, and a medicine's name and dose, are
+ * matchable too.
  */
 export function searchableFields(item) {
-  return [item.note, item.entry_type, item.feed_kind, item.diaper_kind];
+  const temps = item.entry_type === "temperature"
+    ? [fmtTemp(item.temp_c100, "metric"), fmtTemp(item.temp_c100, "imperial"), isFever(item.temp_c100, "metric") || isFever(item.temp_c100, "imperial") ? "fever" : ""]
+    : [];
+  return [item.note, item.entry_type, item.feed_kind, item.diaper_kind, item.med_name, item.med_dose, item.temp_method, ...temps];
 }
 
 /**
@@ -758,4 +771,264 @@ export function nextReminders(baby, entries) {
     out.push({ kind, minutes, dueAt: new Date(new Date(anchors[kind.id]).getTime() + minutes * 60000) });
   }
   return out;
+}
+
+/* ── Temperatures and medicines ─────────────────────────────────────────────
+ * Two entry types (migration 006). A reading is stored in hundredths of a
+ * degree Celsius and shown in the units the viewer picked on the Growth tab
+ * (°F with pounds and inches). A medicine is what was given, with how long
+ * the label or the doctor said to wait before the next dose.
+ */
+
+export const TEMP_METHODS = [
+  { value: "rectal", label: "Rectal" },
+  { value: "armpit", label: "Armpit" },
+  { value: "ear", label: "Ear" },
+  { value: "forehead", label: "Forehead" },
+  { value: "mouth", label: "Mouth" },
+];
+
+export function tempMethodLabel(method) {
+  return TEMP_METHODS.find((m) => m.value === method)?.label ?? method;
+}
+
+/**
+ * Hundredths of a degree Celsius from a form's °F or °C, taken to the tenth a
+ * thermometer shows first. That keeps every stored reading on a shown tenth,
+ * where the °C and °F fever labels agree (see isFever). null when empty, NaN
+ * when not a number.
+ */
+export function tempC100From(value, units) {
+  if (String(value ?? "").trim() === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return NaN;
+  const tenth = Math.round(n * 10) / 10;
+  return Math.round((units === "imperial" ? (tenth - 32) * 5 / 9 : tenth) * 100);
+}
+
+function tempNumber(c100, units) {
+  const c = Number(c100) / 100;
+  return Math.round((units === "imperial" ? c * 9 / 5 + 32 : c) * 10) / 10;
+}
+
+/** The number to put back in a temperature field, in the form's units. "" for none. */
+export function tempValue(c100, units) {
+  if (c100 == null || c100 === "" || !Number.isFinite(Number(c100))) return "";
+  return tempNumber(c100, units).toFixed(1);
+}
+
+/** "101.2 °F" / "38.4 °C"; "" for none. */
+export function fmtTemp(c100, units) {
+  const v = tempValue(c100, units);
+  return v ? `${v} ${units === "imperial" ? "°F" : "°C"}` : "";
+}
+
+/**
+ * 38.0 °C (100.4 °F): the reading a fever starts at. A label, never advice.
+ * Judged on the tenth shown in `units`, so the label always agrees with the
+ * number beside it: 37.97 °C reads "38.0 °C" (a fever) and "100.3 °F" (not).
+ * The form only stores readings on a shown tenth (tempC100From), where both
+ * agree; the reports, which print both, use the exact bound (manifest,
+ * `>= 3800`). Only a reading written some other way can tell them apart.
+ */
+export const FEVER_C100 = 3800;
+
+export function isFever(c100, units = "metric") {
+  if (c100 == null || c100 === "" || !Number.isFinite(Number(c100))) return false;
+  return tempNumber(c100, units) >= tempNumber(FEVER_C100, units);
+}
+
+/** Why a temperature cannot be saved, or "". Far outside 30–45 °C is a typo or the wrong units. */
+export function tempError(c100) {
+  if (c100 == null) return "Enter the temperature.";
+  if (!Number.isFinite(c100)) return "The temperature is not a number.";
+  if (c100 < 3000 || c100 > 4500) return "That temperature looks wrong. Check the number and the units.";
+  return "";
+}
+
+/** Why a medicine cannot be saved, or "". */
+export function medicineError(fields) {
+  if (!String(fields.med_name ?? "").trim()) return "Enter the medicine.";
+  return "";
+}
+
+/** The waits the form offers before the next dose, plus a stored one off the list. */
+export function repeatChoices(...keep) {
+  const set = new Set([240, 360, 480, 720, 1440]);
+  for (const m of keep) if (Number.isInteger(m) && m > 0) set.add(m);
+  return [...set].sort((a, b) => a - b);
+}
+
+const medKey = (name) => String(name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+// A dose or reading's time: any ISO 8601 time with seconds and a zone, the
+// rule the mobile widget and Siri read it by too (mobile logic.ts
+// zonedInstant). The page writes toISOString(); a row written some other way
+// counts only when its time is unambiguous.
+// Every field in range, as the widget checks it: no 30 February, no 24:00
+// (Date.parse would roll those over to the next day).
+const ZONED = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:(Z)|([+-])(\d{2}):(\d{2}))$/;
+const instantMs = (iso) => {
+  const m = typeof iso === "string" ? ZONED.exec(iso) : null;
+  if (!m) return null;
+  const [y, mo, d, h, mi, s] = m.slice(1, 7).map(Number);
+  if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || s > 59) return null;
+  const base = Date.UTC(y, mo - 1, d, h, mi, s);
+  if (new Date(base).getUTCDate() !== d) return null;
+  let offset = 0;
+  if (!m[8]) {
+    const oh = Number(m[10]), om = Number(m[11]);
+    if (oh > 23 || om > 59) return null;
+    offset = (oh * 60 + om) * 60000 * (m[9] === "-" ? -1 : 1);
+  }
+  return base + Number((m[7] ?? "").slice(0, 3).padEnd(3, "0")) - offset;
+};
+
+/**
+ * A child's medicine doses, newest first; ones with no name or time are left
+ * out, and so are ones after `at` (a time typed wrong, or a back-filled dose's
+ * later neighbours) when it is given.
+ */
+function doses(entries, babyId, at = null) {
+  const until = at ? at.getTime() : Infinity;
+  return entries
+    .filter((e) => e.baby_id === babyId && e.entry_type === "medicine" && medKey(e.med_name) && instantMs(e.started_at) != null && instantMs(e.started_at) <= until)
+    .sort((a, b) => instantMs(b.started_at) - instantMs(a.started_at) || String(b.id).localeCompare(String(a.id)));
+}
+
+/** A stated wait longer than a year is no wait (the mobile widget's rule too). */
+export const MAX_WAIT_MIN = 525_600;
+
+/** The wait a dose carries, in whole minutes, or null. */
+function repeatOf(e) {
+  const n = Number(e.repeat_after_min);
+  return e.repeat_after_min != null && e.repeat_after_min !== "" && Number.isInteger(n) && n > 0 && n <= MAX_WAIT_MIN ? n : null;
+}
+
+/**
+ * The medicines given to a child, newest first, one per name (as typed most
+ * recently), with the dose and the wait that last dose carries: a repeat dose
+ * is one tap, and the new dose carries its own wait too.
+ */
+export function recentMedicines(entries, babyId, limit = Infinity, now = new Date()) {
+  const out = new Map();
+  // Up to now, as the log's "not again before": a dose dated ahead by mistake is not the last one given.
+  for (const e of doses(entries, babyId, now)) {
+    const key = medKey(e.med_name);
+    if (!out.has(key)) out.set(key, { med_name: e.med_name.trim(), med_dose: e.med_dose ?? "", repeat_after_min: repeatOf(e) });
+  }
+  return [...out.values()].slice(0, limit);
+}
+
+/** The medicine named among `recentMedicines`, matched as the log matches names, or null. */
+export function knownMedicine(meds, name) {
+  const key = medKey(name);
+  return key ? meds.find((m) => medKey(m.med_name) === key) ?? null : null;
+}
+
+/**
+ * For each medicine whose next dose is still waited for: the last dose and the
+ * time before which not to give it again — that dose plus the wait it carries.
+ * A dose logged with no wait has none: the form fills in the medicine's last
+ * wait, so a dose only lacks one when the caregiver cleared it. Soonest first.
+ */
+export function nextDoses(entries, babyId, now = new Date()) {
+  const last = new Map();
+  for (const e of doses(entries, babyId, now)) {
+    const key = medKey(e.med_name);
+    if (!last.has(key)) last.set(key, e);
+  }
+  const out = [];
+  for (const e of last.values()) {
+    const wait = repeatOf(e);
+    if (wait == null) continue;
+    const notBefore = new Date(instantMs(e.started_at) + wait * 60000);
+    if (notBefore > now) out.push({ name: e.med_name.trim(), dose: e.med_dose ?? "", givenAt: e.started_at, notBefore });
+  }
+  return out.sort((a, b) => a.notBefore - b.notBefore);
+}
+
+/**
+ * The logged dose of the medicine named that a dose given `at` would come too
+ * close to, either side of `at`: a dose back-filled for this morning, or one
+ * logged on another phone a minute after the form was opened, both count. A
+ * dose at or before `at` is judged on its own wait; one after it, on the wait
+ * chosen for the new dose (`chosen`, minutes), or its own when none was: the
+ * form's time is to the minute, so a dose logged seconds after it opened
+ * comes after it. Only the doses either side count — those at the last time
+ * at or before `at` and at the first time after it — never an older one. The nearer, as
+ * { id, name, dose, givenAt, notBefore }; null when none. `excludeId` is the dose
+ * being saved, when an earlier try may already have stored it.
+ */
+export function doseWait(entries, babyId, name, at = new Date(), chosen = null, excludeId = null) {
+  return doseWaits(entries, babyId, name, at, chosen, excludeId)[0] ?? null;
+}
+
+/** Every dose `doseWait` judges too close — those either side of `at` — nearest first. */
+export function doseWaits(entries, babyId, name, at = new Date(), chosen = null, excludeId = null) {
+  const key = medKey(name);
+  if (!key) return [];
+  const pick = Number.isInteger(chosen) && chosen > 0 && chosen <= MAX_WAIT_MIN ? chosen : null;
+  const atMs = at.getTime();
+  const same = doses(entries, babyId).filter((e) => medKey(e.med_name) === key && (excludeId == null || e.id !== excludeId));
+  // The last time at or before `at`, and the first after it — every dose at
+  // either: two caregivers logging in the same minute are two doses.
+  const times = same.map((e) => instantMs(e.started_at));
+  const tBefore = Math.max(...times.filter((t) => t <= atMs));
+  const tAfter = Math.min(...times.filter((t) => t > atMs));
+  const near = [];
+  for (const e of same) {
+    const t = instantMs(e.started_at);
+    if (t !== tBefore && t !== tAfter) continue;
+    const wait = t <= atMs ? repeatOf(e) : pick ?? repeatOf(e);
+    const gap = Math.abs(t - atMs);
+    if (wait != null && gap < wait * 60000) near.push({ e, gap, wait });
+  }
+  return near.sort((a, b) => a.gap - b.gap).map(({ e, wait }) =>
+    ({ id: e.id, name: e.med_name.trim(), dose: e.med_dose ?? "", givenAt: e.started_at, notBefore: new Date(instantMs(e.started_at) + wait * 60000) }));
+}
+
+/** The child's latest temperature taken within `hours` before `now`, ties by id, or null. */
+export function latestTemperature(entries, babyId, now = new Date(), hours = TEMPERATURE_HOURS) {
+  let best = null;
+  for (const e of entries) {
+    if (e.baby_id !== babyId || e.entry_type !== "temperature" || e.temp_c100 == null || e.temp_c100 === "") continue;
+    const t = instantMs(e.started_at);
+    if (t == null || t > now.getTime() || now.getTime() - t > hours * 3600000) continue;
+    const b = best && instantMs(best.started_at);
+    if (!best || t > b || (t === b && String(e.id) > String(best.id))) best = e;
+  }
+  return best;
+}
+
+/** The hours a reading stays on the health line. */
+export const TEMPERATURE_HOURS = 24;
+
+/**
+ * When the health line for a child next changes on its own, as ms, or null:
+ * the soonest wait ending, the last reading leaving after TEMPERATURE_HOURS, a
+ * dose or reading dated ahead coming due, and — while the line shows anything —
+ * midnight, when a time from the day before gains its date. The page redraws
+ * once then rather than every minute.
+ */
+export function healthLineChangesAt(entries, babyId, now = new Date()) {
+  const at = [];
+  const waits = nextDoses(entries, babyId, now);
+  const temp = latestTemperature(entries, babyId, now);
+  if (waits.length) at.push(waits[0].notBefore.getTime());
+  if (temp) at.push(instantMs(temp.started_at) + TEMPERATURE_HOURS * 3600000);
+  const ahead = nextDatedEntry(entries, babyId, now);
+  if (ahead != null) at.push(ahead);
+  if (waits.length || temp) { const midnight = new Date(now); midnight.setHours(24, 0, 0, 0); at.push(midnight.getTime()); }
+  return at.length ? Math.min(...at) : null;
+}
+
+/** When the soonest medicine or temperature entry dated after `now` comes due (a time typed ahead), as ms, or null. */
+export function nextDatedEntry(entries, babyId, now = new Date()) {
+  let soonest = null;
+  for (const e of entries) {
+    if (e.baby_id !== babyId || (e.entry_type !== "medicine" && e.entry_type !== "temperature")) continue;
+    const t = instantMs(e.started_at);
+    if (t != null && t > now.getTime() && (soonest == null || t < soonest)) soonest = t;
+  }
+  return soonest;
 }
