@@ -1293,6 +1293,183 @@
           }
         }
       ]
+    },
+    {
+      "name": "the home-screen widget's and Siri's four writes (the mobile drain's own statements) work for a guest nanny: a feed is stamped with the nanny's id whatever member it claims and a replay adds nothing, a diaper lands, a second sleep start is refused, and a stale stop leaves the first wake-up time",
+      "members": {
+        "parent": "adult",
+        "nanny": "guest"
+      },
+      "granted": [
+        "nanny"
+      ],
+      "steps": [
+        {
+          "action": "seedRaw",
+          "sql": "INSERT INTO app_baby_log__babies (id, name, birth_date, emoji, archived, created_by, created_at) VALUES ('b1', 'Juniper', '2025-12-01', '👶', 0, ?, '2026-01-01T00:00:00Z')",
+          "params": [
+            "{{parent}}"
+          ]
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, feed_kind, created_by, created_by_name, created_at) VALUES (?, ?, 'feed', ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+          "params": [
+            "w1",
+            "b1",
+            "2026-01-05T13:00:00.000Z",
+            "2026-01-05T06:00",
+            "nurse-left",
+            "{{parent}}",
+            "Pat",
+            "2026-01-05T13:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, feed_kind, created_by, created_by_name, created_at) VALUES (?, ?, 'feed', ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+          "params": [
+            "w1",
+            "b1",
+            "2026-01-05T13:00:00.000Z",
+            "2026-01-05T06:00",
+            "nurse-left",
+            "{{parent}}",
+            "Pat",
+            "2026-01-05T13:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, feed_kind, local_at FROM app_baby_log__entries WHERE id = 'w1' AND created_by = ?",
+          "params": [
+            "{{nanny}}"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "w1",
+                "feed_kind": "nurse-left",
+                "local_at": "2026-01-05T06:00"
+              }
+            ]
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, diaper_kind, created_by, created_by_name, created_at) VALUES (?, ?, 'diaper', ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+          "params": [
+            "w2",
+            "b1",
+            "2026-01-05T13:00:00.000Z",
+            "2026-01-05T06:00",
+            "wet",
+            "{{nanny}}",
+            "Pat",
+            "2026-01-05T13:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, created_by, created_by_name, created_at) VALUES (?, ?, 'sleep', ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+          "params": [
+            "s1",
+            "b1",
+            "2026-01-05T13:00:00.000Z",
+            "2026-01-05T06:00",
+            "{{nanny}}",
+            "Pat",
+            "2026-01-05T13:00:00.000Z"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "INSERT INTO app_baby_log__entries (id, baby_id, entry_type, started_at, local_at, created_by, created_by_name, created_at) VALUES (?, ?, 'sleep', ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+          "params": [
+            "s2",
+            "b1",
+            "2026-01-05T13:00:00.000Z",
+            "2026-01-05T06:00",
+            "{{parent}}",
+            "Alex",
+            "2026-01-05T13:00:00.000Z"
+          ],
+          "expect": {
+            "status": 400
+          }
+        },
+        {
+          "action": "db",
+          "as": "nanny",
+          "sql": "UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ? AND (ended_at IS NULL OR ended_at = '')",
+          "params": [
+            "2026-01-05T14:30:00.000Z",
+            "s1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "UPDATE app_baby_log__entries SET ended_at = ? WHERE id = ? AND (ended_at IS NULL OR ended_at = '')",
+          "params": [
+            "2026-01-05T15:00:00.000Z",
+            "s1"
+          ],
+          "expect": {
+            "status": 200
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id FROM app_baby_log__entries WHERE entry_type = ? AND baby_id = 'b1'",
+          "params": [
+            "diaper"
+          ],
+          "expect": {
+            "status": 200,
+            "rowCount": 1
+          }
+        },
+        {
+          "action": "db",
+          "as": "parent",
+          "sql": "SELECT id, ended_at FROM app_baby_log__entries WHERE entry_type = 'sleep'",
+          "expect": {
+            "status": 200,
+            "rowCount": 1,
+            "rowsContain": [
+              {
+                "id": "s1",
+                "ended_at": "2026-01-05T14:30:00.000Z"
+              }
+            ]
+          }
+        }
+      ]
     }
   ]
 }
